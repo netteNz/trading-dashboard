@@ -12,6 +12,7 @@ const AVAILABLE = [
   { fn: "mom",    label: "Mom Oscillator",   params: [{ key: "period", label: "Period", default: 14 }] },
   { fn: "sqz",    label: "Squeeze Mom",      params: [] },
   { fn: "vol",    label: "Volume Profile",   params: [] },
+  { fn: "tma",    label: "Triple MA Crossover", params: [{ key: "fast", label: "Fast Period", default: 3 }, { key: "mid", label: "Mid Period", default: 7 }, { key: "slow", label: "Slow Period", default: 20 }] },
 ];
 
 export default function IndicatorPanel({ active, onChange }) {

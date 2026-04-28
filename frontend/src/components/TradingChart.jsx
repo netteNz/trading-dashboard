@@ -50,7 +50,15 @@ export default function TradingChart({ data, lastTick }) {
 
     // Destroy previous
     if (chartRef.current) {
-      chartRef.current.remove();
+      try {
+        for (const { chart: sub, el } of Object.values(panesRef.current)) {
+          sub.remove();
+          el.remove();
+        }
+        chartRef.current.remove();
+      } catch (e) {
+        console.warn("Error destroying previous chart:", e);
+      }
       chartRef.current = null;
       seriesMap.current = {};
       panesRef.current  = {};
@@ -85,21 +93,40 @@ export default function TradingChart({ data, lastTick }) {
     seriesMap.current["__candles__"] = candleSeries;
 
     // ── Pane 0 overlays (main chart) ────────────────────────────────────────
+    const markers = [];
     const pane0Indicators = indicators.filter(ind => ind.pane === 0);
     for (const ind of pane0Indicators) {
-      const series = chart.addLineSeries({
-        color:     ind.color,
-        lineWidth: 1,
-        lineStyle: lineStyleFromStr(ind.lineStyle),
-        title:     ind.label,
-        priceLineVisible: false,
-        lastValueVisible: true,
-      });
-      const seriesData = candles
-        .filter(d => d[ind.key] != null)
-        .map(d => ({ time: d.time, value: d[ind.key] }));
-      series.setData(seriesData);
-      seriesMap.current[ind.key] = series;
+      if (ind.type === "scatter") {
+        const indMarkers = candles
+          .filter(d => d[ind.key] != null)
+          .map(d => ({
+            time: d.time,
+            position: ind.key.includes("BUY") ? "belowBar" : "aboveBar",
+            color: ind.color,
+            shape: ind.key.includes("BUY") ? "arrowUp" : "arrowDown",
+            text: ind.label,
+          }));
+        markers.push(...indMarkers);
+      } else {
+        const series = chart.addLineSeries({
+          color:     ind.color,
+          lineWidth: 1,
+          lineStyle: lineStyleFromStr(ind.lineStyle),
+          title:     ind.label,
+          priceLineVisible: false,
+          lastValueVisible: true,
+        });
+        const seriesData = candles
+          .filter(d => d[ind.key] != null)
+          .map(d => ({ time: d.time, value: d[ind.key] }));
+        series.setData(seriesData);
+        seriesMap.current[ind.key] = series;
+      }
+    }
+
+    if (markers.length > 0) {
+      markers.sort((a, b) => a.time - b.time);
+      candleSeries.setMarkers(markers);
     }
 
     // ── Sub-pane charts (pane > 0) ──────────────────────────────────────────
@@ -194,6 +221,7 @@ export default function TradingChart({ data, lastTick }) {
         el.remove();
       }
       chart.remove();
+      chartRef.current = null;
     };
   }, [data]);
 

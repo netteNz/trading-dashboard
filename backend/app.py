@@ -30,7 +30,8 @@ DEFAULT_INDICATORS = [
 
 INDICATOR_PRESETS = {
     "trend":     [{"fn": "ema", "kwargs": {"length": 20}}, {"fn": "ema", "kwargs": {"length": 50}},
-                  {"fn": "bbands", "kwargs": {}}, {"fn": "vwap", "kwargs": {}}],
+                  {"fn": "bbands", "kwargs": {}}, {"fn": "vwap", "kwargs": {}},
+                  {"fn": "tma", "kwargs": {"fast": 3, "mid": 7, "slow": 20}}],
     "momentum":  [{"fn": "rsi", "kwargs": {}}, {"fn": "macd", "kwargs": {}}, {"fn": "mom", "kwargs": {}}],
     "scalp":     [{"fn": "ema", "kwargs": {"length": 9}}, {"fn": "ema", "kwargs": {"length": 21}},
                   {"fn": "rsi", "kwargs": {}}, {"fn": "stoch", "kwargs": {}}],
@@ -55,6 +56,7 @@ def _build_engine(df, indicator_list: list) -> IndicatorEngine:
             elif fn == "mom":   engine.add_momentum_oscillator(**kw)
             elif fn == "sqz":   engine.add_squeeze_momentum()
             elif fn == "vol":   engine.add_volume_profile()
+            elif fn == "tma":   engine.add_triple_ma(**kw)
         except Exception as e:
             print(f"[engine] skipping {fn}: {e}")
     return engine
@@ -115,7 +117,7 @@ def list_indicators():
     """Return the full list of available indicator function names."""
     return jsonify({
         "standard": ["ema", "sma", "bbands", "rsi", "macd", "atr", "stoch"],
-        "custom":   ["vwap", "mom", "sqz", "vol"],
+        "custom":   ["vwap", "mom", "sqz", "vol", "tma"],
     })
 
 

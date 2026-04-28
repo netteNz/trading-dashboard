@@ -4,6 +4,7 @@ import pandas_ta as ta
 
 from indicators.custom.vwap_band import vwap_band
 from indicators.custom.momentum  import momentum_oscillator, squeeze_momentum
+from indicators.custom.triple_ma import triple_ma
 
 
 class IndicatorEngine:
@@ -131,6 +132,20 @@ class IndicatorEngine:
         self.df = pd.concat([self.df, result], axis=1)
         self._indicator_meta.append({"key": "SQZ_VAL", "type": "histogram", "pane": 7, "color": "#818cf8", "label": "Squeeze"})
         self._indicator_meta.append({"key": "SQZ_ON",  "type": "line",      "pane": 7, "color": "#ef4444", "label": "Sqz On"})
+        return self
+
+    def add_triple_ma(self, fast: int = 3, mid: int = 7, slow: int = 20) -> "IndicatorEngine":
+        """Add Triple MA crossover — 3 overlay lines + buy/sell signal markers."""
+        result = triple_ma(self.df, fast=fast, mid=mid, slow=slow)
+        self.df = pd.concat([self.df, result], axis=1)
+        
+        self._indicator_meta.append({"key": f"TMA_{fast}",  "type": "line", "pane": 0, "color": "#58a6ff", "label": f"SMA {fast}"})
+        self._indicator_meta.append({"key": f"TMA_{mid}",   "type": "line", "pane": 0, "color": "#f0883e", "label": f"SMA {mid}"})
+        self._indicator_meta.append({"key": f"TMA_{slow}",  "type": "line", "pane": 0, "color": "#bc8cff", "label": f"SMA {slow}"})
+        self._indicator_meta.append({"key": "TMA_BUY",      "type": "scatter", "pane": 0, "color": "#3fb950", "label": "TMA Buy"})
+        self._indicator_meta.append({"key": "TMA_SELL",     "type": "scatter", "pane": 0, "color": "#f85149", "label": "TMA Sell"})
+        self._indicator_meta.append({"key": "TMA_ALIGN",    "type": "histogram", "pane": 8, "color": "#3fb950", "label": "TMA Align"})
+        
         return self
 
     # ── Generic passthrough ───────────────────────────────────────────────────

@@ -1,145 +1,148 @@
-# ⬡ TradeView — Personal Trading Dashboard
+# TradeView — Agent Handoff
 
-A self-hosted charting dashboard with unlimited indicators, custom indicator engine, and live WebSocket streaming — built to replace TradingView's 2-indicator cap.
-
----
-
-## Stack
-
-| Layer     | Tech                                      |
-|-----------|-------------------------------------------|
-| Frontend  | React 18 + Vite + Lightweight Charts v4  |
-| Backend   | Flask + Flask-SocketIO + eventlet         |
-| Indicators| pandas-ta + custom Python modules         |
-| Data      | yfinance (free) · Alpaca (real-time)      |
-| Streaming | Alpaca WebSocket → SocketIO → React       |
+Self-hosted trading dashboard. Unlimited indicators, custom indicator engine, live WebSocket streaming.
 
 ---
 
-## Quick Start
+## STACK
 
-### 1. Backend
+- Frontend: React 18 + Vite + Lightweight Charts v4 — `frontend/`
+- Backend: Flask + Flask-SocketIO + eventlet — `backend/`
+- Indicators: pandas-ta + custom modules — `backend/indicators/custom/`
+- Data: yfinance (default, no keys) · Alpaca (real-time, requires keys)
+- Streaming: Alpaca WebSocket → Flask-SocketIO → React useWebSocket hook
+
+---
+
+## SETUP
+
+Run in order. Do not skip steps.
 
 ```bash
+# 1. Backend
 cd backend
-python -m venv venv && source venv/bin/activate
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-
 cp .env.example .env
-# Edit .env — set DATA_PROVIDER=yfinance to start without Alpaca keys
 
-python app.py
-# → http://localhost:5000
-```
-
-### 2. Frontend
-
-```bash
-cd frontend
+# 2. Frontend
+cd ../frontend
 npm install
-npm run dev
-# → http://localhost:3000
 ```
 
-### 3. Docker (both at once)
+---
+
+## ENVIRONMENT
+
+File: `backend/.env`
+
+| Variable            | Required | Default                             | Notes                             |
+|---------------------|----------|-------------------------------------|-----------------------------------|
+| `DATA_PROVIDER`     | yes      | `yfinance`                          | set `alpaca` for real-time        |
+| `ALPACA_API_KEY`    | no       | —                                   | required if DATA_PROVIDER=alpaca  |
+| `ALPACA_SECRET_KEY` | no       | —                                   | required if DATA_PROVIDER=alpaca  |
+| `ALPACA_BASE_URL`   | no       | `https://paper-api.alpaca.markets`  |                                   |
+| `FLASK_ENV`         | no       | `development`                       |                                   |
+| `FLASK_PORT`        | no       | `5000`                              |                                   |
+
+---
+
+## ENTRYPOINTS
 
 ```bash
+# Backend — http://localhost:5000
+cd backend && source venv/bin/activate && python app.py
+
+# Frontend — http://localhost:3000
+cd frontend && npm run dev
+
+# Both via Docker
 cp backend/.env.example backend/.env
 docker compose up --build
 ```
 
 ---
 
-## API Reference
+## API
 
-### `GET /api/chart/:symbol`
+| Method | Route                | Params                                                                  | Returns                        |
+|--------|----------------------|-------------------------------------------------------------------------|--------------------------------|
+| GET    | `/api/chart/:symbol` | `tf` (default `1Day`), `limit` (default `500`), `preset`, `indicators` | `{ candles[], indicators[] }`  |
+| GET    | `/api/presets`       | —                                                                       | `string[]`                     |
+| GET    | `/api/indicators`    | —                                                                       | `{ standard[], custom[] }`     |
+| GET    | `/api/search?q=`     | `q`                                                                     | `{ symbol, name, exchange }[]` |
 
-| Param        | Default  | Description                          |
-|--------------|----------|--------------------------------------|
-| `tf`         | `1Day`   | Timeframe: `1Min` `5Min` `1Hour` etc |
-| `limit`      | `500`    | Number of bars                        |
-| `preset`     | `full`   | `trend` `momentum` `scalp` `full`    |
-| `indicators` | —        | JSON array of indicator configs       |
+`tf` values: `1Min` `5Min` `15Min` `30Min` `1Hour` `1Day` `1Week`
 
-**Response:**
-```json
-{
-  "candles": [
-    { "time": 1712534400, "open": 512.1, "high": 515.3, "low": 510.0, "close": 514.2, "volume": 98123456,
-      "EMA_20": 511.4, "RSI_14": 58.2, "MACD": 1.23, "VWAP": 512.8, ... }
-  ],
-  "indicators": [
-    { "key": "EMA_20", "type": "line", "pane": 0, "color": "#38bdf8", "label": "EMA 20" },
-    ...
-  ]
-}
-```
+`preset` values: `trend` `momentum` `scalp` `full`
 
-### `GET /api/presets` → list of preset names  
-### `GET /api/indicators` → available standard + custom indicator keys  
-### `GET /api/search?q=AAPL` → symbol lookup  
+`indicators` param: JSON array — `[{"fn":"ema","kwargs":{"length":20}}]`
+
+Candle object shape: `{ time: unix_seconds, open, high, low, close, volume, ...indicator_keys }`
+
+Indicator meta shape: `{ key, type: "line"|"histogram", pane: int, color: hex, label, lineStyle?, levels? }`
 
 ---
 
-## Custom Indicators
+## EXTEND — Adding a Custom Indicator
 
-Drop a new file in `backend/indicators/custom/` and register it in `engine.py`:
+Follow this exact pattern. Three touch points.
+
+**1. Create** `backend/indicators/custom/<name>.py`
 
 ```python
-# backend/indicators/custom/my_indicator.py
-def my_indicator(df, period=14):
-    result = pd.DataFrame(index=df.index)
-    result["MY_IND"] = df["close"].rolling(period).mean()  # your logic
-    return result
+import pandas as pd
 
-# backend/indicators/engine.py  →  IndicatorEngine class
-def add_my_indicator(self, period=14):
-    result = my_indicator(self.df, period=period)
+def <name>(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    result = pd.DataFrame(index=df.index)
+    result["<COL_KEY>"] = # your logic using df["close"], df["high"], df["low"], df["volume"]
+    return result
+```
+
+**2. Register** in `backend/indicators/engine.py` — add a method to `IndicatorEngine`:
+
+```python
+from indicators.custom.<name> import <name>
+
+def add_<name>(self, period: int = 14) -> "IndicatorEngine":
+    result = <name>(self.df, period=period)
     self.df = pd.concat([self.df, result], axis=1)
     self._indicator_meta.append({
-        "key": "MY_IND", "type": "line", "pane": 1,
-        "color": "#f472b6", "label": "My Indicator"
+        "key":   "<COL_KEY>",
+        "type":  "line",          # or "histogram"
+        "pane":  1,               # 0 = main chart overlay, 1+ = sub-pane
+        "color": "#hex",
+        "label": "Display Name",
     })
     return self
 ```
 
-Then call it in `app.py`:
+**3. Wire** in `backend/app.py` inside `_build_engine()`:
+
 ```python
-engine.add_my_indicator(period=21)
+elif fn == "<shortname>": engine.add_<name>(**kw)
+```
+
+Then expose in `frontend/src/components/IndicatorPanel.jsx` by appending to `AVAILABLE`:
+
+```js
+{ fn: "<shortname>", label: "Display Name", params: [{ key: "period", label: "Period", default: 14 }] }
 ```
 
 ---
 
-## Timeframes
+## DATA FLOW
 
-| Value   | Description     |
-|---------|-----------------|
-| `1Min`  | 1-minute bars   |
-| `5Min`  | 5-minute bars   |
-| `15Min` | 15-minute bars  |
-| `30Min` | 30-minute bars  |
-| `1Hour` | Hourly bars     |
-| `1Day`  | Daily bars      |
-| `1Week` | Weekly bars     |
+```
+GET /api/chart/:symbol
+  → DataSource.get_bars()        # yfinance or Alpaca REST
+  → IndicatorEngine(df)          # loads OHLCV
+      .add_*()                   # mutates self.df + appends to _indicator_meta
+  → engine.serialize()           # { candles[], indicators[] }
+  → useChartData()               # React fetch hook
+  → TradingChart.jsx             # pane 0 = main chart, pane 1+ = sub-charts
 
----
-
-## Live Streaming (Alpaca)
-
-1. Set `ALPACA_API_KEY` and `ALPACA_SECRET_KEY` in `backend/.env`
-2. Set `DATA_PROVIDER=alpaca`
-3. Restart backend — the stream starts automatically for default symbols
-4. Frontend subscribes via SocketIO on symbol change
-
----
-
-## Environment Variables
-
-```env
-ALPACA_API_KEY=...
-ALPACA_SECRET_KEY=...
-ALPACA_BASE_URL=https://paper-api.alpaca.markets
-DATA_PROVIDER=yfinance          # or alpaca
-FLASK_ENV=development
-FLASK_PORT=5000
+Live tick:
+  Alpaca WS → ws/stream.py → socketio.emit("tick") → useWebSocket() → TradingChart update
 ```

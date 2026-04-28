@@ -1,0 +1,144 @@
+import os
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from flask_socketio import SocketIO
+from dotenv import load_dotenv
+
+from data.source import DataSource
+from indicators.engine import IndicatorEngine
+
+load_dotenv()
+
+app     = Flask(__name__)
+CORS(app, origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+
+ds = DataSource()
+
+# ── Default indicator preset ─────────────────────────────────────────────────
+
+DEFAULT_INDICATORS = [
+    {"fn": "ema",    "kwargs": {"length": 20}},
+    {"fn": "ema",    "kwargs": {"length": 50}},
+    {"fn": "bbands", "kwargs": {}},
+    {"fn": "rsi",    "kwargs": {}},
+    {"fn": "macd",   "kwargs": {}},
+    {"fn": "vwap",   "kwargs": {}},
+    {"fn": "mom",    "kwargs": {}},
+    {"fn": "vol",    "kwargs": {}},
+]
+
+INDICATOR_PRESETS = {
+    "trend":     [{"fn": "ema", "kwargs": {"length": 20}}, {"fn": "ema", "kwargs": {"length": 50}},
+                  {"fn": "bbands", "kwargs": {}}, {"fn": "vwap", "kwargs": {}}],
+    "momentum":  [{"fn": "rsi", "kwargs": {}}, {"fn": "macd", "kwargs": {}}, {"fn": "mom", "kwargs": {}}],
+    "scalp":     [{"fn": "ema", "kwargs": {"length": 9}}, {"fn": "ema", "kwargs": {"length": 21}},
+                  {"fn": "rsi", "kwargs": {}}, {"fn": "stoch", "kwargs": {}}],
+    "full":      DEFAULT_INDICATORS,
+}
+
+
+def _build_engine(df, indicator_list: list) -> IndicatorEngine:
+    engine = IndicatorEngine(df)
+    for item in indicator_list:
+        fn   = item.get("fn", "")
+        kw   = item.get("kwargs", {})
+        try:
+            if fn == "ema":     engine.add_ema(**kw)
+            elif fn == "sma":   engine.add_sma(**kw)
+            elif fn == "bbands":engine.add_bbands(**kw)
+            elif fn == "rsi":   engine.add_rsi(**kw)
+            elif fn == "macd":  engine.add_macd(**kw)
+            elif fn == "atr":   engine.add_atr(**kw)
+            elif fn == "stoch": engine.add_stoch(**kw)
+            elif fn == "vwap":  engine.add_vwap_band(**kw)
+            elif fn == "mom":   engine.add_momentum_oscillator(**kw)
+            elif fn == "sqz":   engine.add_squeeze_momentum()
+            elif fn == "vol":   engine.add_volume_profile()
+        except Exception as e:
+            print(f"[engine] skipping {fn}: {e}")
+    return engine
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.route("/api/health")
+def health():
+    return jsonify({"status": "ok", "provider": ds.provider})
+
+
+@app.route("/api/chart/<symbol>")
+def get_chart(symbol: str):
+    """
+    GET /api/chart/AAPL?tf=1Day&limit=500&preset=full
+    GET /api/chart/AAPL?tf=1Hour&limit=200&indicators=[{"fn":"ema","kwargs":{"length":20}}]
+    """
+    import json as _json
+
+    timeframe = request.args.get("tf", "1Day")
+    limit     = int(request.args.get("limit", 500))
+    preset    = request.args.get("preset", "full")
+
+    # Custom indicator list takes priority over preset
+    raw_indicators = request.args.get("indicators")
+    if raw_indicators:
+        try:
+            indicator_list = _json.loads(raw_indicators)
+        except Exception:
+            indicator_list = INDICATOR_PRESETS.get(preset, DEFAULT_INDICATORS)
+    else:
+        indicator_list = INDICATOR_PRESETS.get(preset, DEFAULT_INDICATORS)
+
+    try:
+        df     = ds.get_bars(symbol, timeframe, limit=limit)
+        engine = _build_engine(df, indicator_list)
+        return jsonify(engine.serialize())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/presets")
+def get_presets():
+    return jsonify(list(INDICATOR_PRESETS.keys()))
+
+
+@app.route("/api/search")
+def search():
+    q = request.args.get("q", "")
+    if not q:
+        return jsonify([])
+    return jsonify(ds.search_symbols(q))
+
+
+@app.route("/api/indicators")
+def list_indicators():
+    """Return the full list of available indicator function names."""
+    return jsonify({
+        "standard": ["ema", "sma", "bbands", "rsi", "macd", "atr", "stoch"],
+        "custom":   ["vwap", "mom", "sqz", "vol"],
+    })
+
+
+# ── SocketIO events ───────────────────────────────────────────────────────────
+
+@socketio.on("subscribe")
+def handle_subscribe(data):
+    symbol = data.get("symbol", "").upper()
+    if symbol:
+        from ws.stream import subscribe
+        subscribe(symbol)
+        print(f"[ws] client subscribed to {symbol}")
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    port = int(os.getenv("FLASK_PORT", 5000))
+
+    # Only start the Alpaca stream when real keys are configured
+    if os.getenv("ALPACA_API_KEY") and os.getenv("ALPACA_API_KEY") != "your_alpaca_key_here":
+        from ws.stream import start_stream
+        start_stream(socketio, symbols=["AAPL", "SPY", "QQQ"])
+
+    print(f"[app] starting on port {port} — provider={ds.provider}")
+    socketio.run(app, host="0.0.0.0", port=port, debug=True)

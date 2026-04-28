@@ -118,15 +118,18 @@ Live tick:
 4. Expose in frontend: append `{ fn, label, params }` to `AVAILABLE` in `IndicatorPanel.jsx`
 
 ## Constraints & Gotchas
-- **pandas-ta**: use `0.4.71b0` — `0.4.67b0` imports `posix` module (Linux-only), crashes on Windows
-- **numpy**: must be `>=2.0.0` — `1.26.x` does not support Python 3.13
-- **pandas**: must be `>=2.3.2` — required by pandas-ta 0.4.x; pip resolves to 3.0.2
-- **yfinance**: `0.2.40` pin in original README is stale — pip resolves to 1.3.0, works fine
-- **eventlet**: Flask-SocketIO async_mode is `eventlet` — do not switch to `threading` without testing WS
-- **vite port**: frontend dev server runs on 3000 (configured in vite.config.js), not the Vite default 5173
-- **Alpaca 1Week**: `TimeFrame.Week` not mapped in `_get_bars_alpaca()` — falls back to Day silently
-- **search_symbols**: returns single-item list via `fast_info` — not a real search index
+- **pandas-ta**: use `0.4.71b0` (original Windows setup) — on macOS with Python 3.14, we downgraded to `0.4.67b0` and stubbed `numba` to bypass constraints.
+- **numpy**: must be `>=2.0.0`.
+- **pandas**: must be `>=2.3.2` — required by pandas-ta.
+- **yfinance**: `0.2.40` pin in original README is stale — pip resolves to 1.3.0.
+- **eventlet / threading**: Switched Flask-SocketIO `async_mode` to `threading` in `backend/app.py` to support Python 3.14 on macOS. If returning to Windows with eventlet requirements, consider reverting if needed.
+- **Timestamp bug fix**: Patched `backend/indicators/engine.py:serialize()` with resolution-agnostic epoch subtraction via `total_seconds()`.
+
+## Recent Updates (for Windows Handoff)
+1. **API Wiring & Verification**: Validated endpoints `/api/health`, `/api/chart/:symbol`, `/api/presets`, `/api/indicators`, and `/api/search` using the `yfinance` provider.
+2. **Missing Dependencies**: Added manual install of `tqdm` and `scipy` which are implicitly required by `pandas-ta` when using `--no-deps`.
 
 ## Out of Scope
-- `backend/ws/stream.py` Alpaca streaming: stubbed for paper keys; not testable without live Alpaca credentials
-- Docker: `docker-compose.yml` exists but has not been validated against the updated requirements
+- `backend/ws/stream.py` Alpaca streaming: stubbed for paper keys; not testable without live Alpaca credentials.
+- Docker: `docker-compose.yml` exists but has not been validated against the updated requirements.
+

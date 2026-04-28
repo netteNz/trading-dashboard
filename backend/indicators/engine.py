@@ -160,16 +160,19 @@ class IndicatorEngine:
         df = df.reset_index()
 
         # Normalise timestamp to Unix seconds (int)
+        # pandas 3.x stores DatetimeTZDtype as datetime64[s] (not ns),
+        # so .astype(int64) or .view(int64) return seconds, not nanoseconds.
+        # Epoch subtraction via total_seconds() is resolution-agnostic.
+        _epoch = pd.Timestamp("1970-01-01", tz="UTC")
+
+        def _to_unix(series: pd.Series) -> pd.Series:
+            dt = pd.to_datetime(series, utc=True)
+            return (dt - _epoch).dt.total_seconds().astype("int64")
+
         if "timestamp" in df.columns:
-            df["time"] = (
-                pd.to_datetime(df["timestamp"], utc=True)
-                .astype(np.int64) // 10**9
-            )
+            df["time"] = _to_unix(df["timestamp"])
         elif "index" in df.columns:
-            df["time"] = (
-                pd.to_datetime(df["index"], utc=True)
-                .astype(np.int64) // 10**9
-            )
+            df["time"] = _to_unix(df["index"])
 
         records = df.to_dict(orient="records")
         # Replace NaN with None for JSON serialisation

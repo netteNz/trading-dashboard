@@ -143,4 +143,4 @@ if __name__ == "__main__":
         start_stream(socketio, symbols=["AAPL", "SPY", "QQQ"])
 
     print(f"[app] starting on port {port} — provider={ds.provider}")
-    socketio.run(app, host="0.0.0.0", port=port, debug=True)
+    socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)

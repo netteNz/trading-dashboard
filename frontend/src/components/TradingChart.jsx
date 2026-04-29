@@ -4,6 +4,7 @@ import {
   CrosshairMode,
   LineStyle,
   PriceScaleMode,
+  LineType,
 } from "lightweight-charts";
 
 const CHART_THEME = {
@@ -67,7 +68,8 @@ export default function TradingChart({ data, lastTick }) {
     const { candles, indicators } = data;
 
     // ── Main chart ──────────────────────────────────────────────────────────
-    const mainH = Math.round(containerRef.current.clientHeight * 0.55);
+    const totalH = containerRef.current.parentNode ? containerRef.current.parentNode.clientHeight : 500;
+    const mainH = Math.round(totalH * 0.55);
 
     const chart = createChart(containerRef.current, {
       ...CHART_THEME,
@@ -110,8 +112,9 @@ export default function TradingChart({ data, lastTick }) {
       } else {
         const series = chart.addLineSeries({
           color:     ind.color,
-          lineWidth: 1,
+          lineWidth: 1.5,
           lineStyle: lineStyleFromStr(ind.lineStyle),
+          lineType:  LineType.Curved,
           title:     ind.label,
           priceLineVisible: false,
           lastValueVisible: true,
@@ -132,7 +135,7 @@ export default function TradingChart({ data, lastTick }) {
     // ── Sub-pane charts (pane > 0) ──────────────────────────────────────────
     const subPaneIndices = [...new Set(indicators.filter(i => i.pane > 0).map(i => i.pane))].sort();
     const subH = subPaneIndices.length > 0
-      ? Math.round((containerRef.current.clientHeight - mainH) / subPaneIndices.length)
+      ? Math.round((totalH - mainH) / subPaneIndices.length)
       : 0;
 
     for (const paneIdx of subPaneIndices) {
@@ -172,8 +175,9 @@ export default function TradingChart({ data, lastTick }) {
         } else {
           series = subChart.addLineSeries({
             color:            ind.color,
-            lineWidth:        1,
+            lineWidth:        1.5,
             lineStyle:        lineStyleFromStr(ind.lineStyle),
+            lineType:         LineType.Curved,
             priceLineVisible: false,
             title:            ind.label,
           });

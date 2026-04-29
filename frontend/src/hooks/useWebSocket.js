@@ -5,7 +5,7 @@ let _socket = null;
 
 function getSocket() {
   if (!_socket) {
-    _socket = io("/", { transports: ["websocket"], autoConnect: true });
+    _socket = io("/", { autoConnect: true });
   }
   return _socket;
 }

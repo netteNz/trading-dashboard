@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 
-const POPULAR = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "AMZN", "GOOGL", "BTC-USD", "ETH-USD"];
+const POPULAR = ["SPY", "QQQ"];
 
 export default function SymbolSearch({ value, onChange }) {
   const [query,    setQuery]    = useState(value || "");

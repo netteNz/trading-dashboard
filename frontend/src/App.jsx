@@ -168,7 +168,7 @@ export default function App() {
       {/* ── Bottom ticker ── */}
       <footer className="h-6 bg-surface-1 border-t border-surface-2 overflow-hidden flex items-center shrink-0">
         <div className="ticker-tape flex items-center gap-8 text-[10px] font-mono text-surface-4 whitespace-nowrap">
-          {["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META"].map(sym => (
+          {["SPY", "QQQ"].map(sym => (
             <button
               key={sym}
               onClick={() => setSymbol(sym)}
@@ -178,7 +178,7 @@ export default function App() {
             </button>
           ))}
           {/* Duplicate for seamless scroll */}
-          {["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META"].map(sym => (
+          {["SPY", "QQQ"].map(sym => (
             <button
               key={`${sym}_2`}
               onClick={() => setSymbol(sym)}

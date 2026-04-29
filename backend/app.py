@@ -140,7 +140,7 @@ if __name__ == "__main__":
     # Only start the Alpaca stream when real keys are configured
     if os.getenv("ALPACA_API_KEY") and os.getenv("ALPACA_API_KEY") != "your_alpaca_key_here":
         from ws.stream import start_stream
-        start_stream(socketio, symbols=["AAPL", "SPY", "QQQ"])
+        start_stream(socketio, symbols=["SPY", "QQQ"])
 
     print(f"[app] starting on port {port} — provider={ds.provider}")
     socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)

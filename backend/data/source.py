@@ -1,10 +1,16 @@
 import os
+import asyncio
+import logging
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# ── Timeframe maps ─────────────────────────────────────────────────────────────
 
 TIMEFRAME_MAP_YF = {
     "1Min":  "1m",
@@ -27,6 +33,8 @@ PERIOD_MAP_YF = {
 }
 
 
+# ── Historical data ────────────────────────────────────────────────────────────
+
 class DataSource:
     def __init__(self, provider: str = None):
         self.provider = provider or os.getenv("DATA_PROVIDER", "yfinance")
@@ -46,11 +54,9 @@ class DataSource:
 
     def get_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 500) -> pd.DataFrame:
         symbol = symbol.upper()
-
         if self.provider == "alpaca":
             return self._get_bars_alpaca(symbol, timeframe, limit)
-        else:
-            return self._get_bars_yfinance(symbol, timeframe, limit)
+        return self._get_bars_yfinance(symbol, timeframe, limit)
 
     def _get_bars_yfinance(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
         yf_interval = TIMEFRAME_MAP_YF.get(timeframe, "1d")
@@ -95,7 +101,6 @@ class DataSource:
         return bars.tail(limit)
 
     def search_symbols(self, query: str) -> list:
-        """Basic symbol lookup via yfinance"""
         try:
             ticker = yf.Ticker(query.upper())
             info = ticker.fast_info
@@ -106,3 +111,87 @@ class DataSource:
             }]
         except Exception:
             return []
+
+
+# ── Live WebSocket stream ──────────────────────────────────────────────────────
+
+class AlpacaStream:
+    """
+    Wraps alpaca-py StockDataStream and emits normalised bar dicts to a callback.
+
+    Bar dict shape (matches /api/chart candle contract):
+        {
+            "symbol": "SPY",
+            "time":   1704067200,   # unix seconds (int)
+            "open":   476.32,
+            "high":   478.91,
+            "low":    475.10,
+            "close":  477.85,
+            "volume": 82341200,
+        }
+
+    Usage:
+        stream = AlpacaStream(on_bar=my_callback, feed="iex")
+        stream.subscribe("SPY", "QQQ")
+        stream.run()          # blocking — call from a daemon thread
+    """
+    
+    def __init__(self, on_bar, feed: str = "iex"):
+        from alpaca.data.live import StockDataStream
+        from alpaca.data.enums import DataFeed
+
+        feed_enum = DataFeed.IEX if feed.lower() == "iex" else DataFeed.SIP
+
+        self._on_bar  = on_bar
+        self._feed    = feed
+        self._symbols: set[str] = set()
+        self._stream  = StockDataStream(
+            api_key=os.environ["ALPACA_API_KEY"],
+            secret_key=os.environ["ALPACA_SECRET_KEY"],
+            feed=feed_enum,
+        )
+
+    # ── public ────────────────────────────────────────────────────────────────
+
+    def subscribe(self, *symbols: str):
+        """Register one or more symbols for bar updates."""
+        clean = [s.upper() for s in symbols]
+        self._symbols.update(clean)
+        self._stream.subscribe_bars(self._handle_bar, *clean)
+        logger.info("AlpacaStream subscribed: %s", clean)
+
+    def unsubscribe(self, *symbols: str):
+        clean = [s.upper() for s in symbols]
+        self._symbols.difference_update(clean)
+        self._stream.unsubscribe_bars(*clean)
+        logger.info("AlpacaStream unsubscribed: %s", clean)
+
+    def run(self):
+        """Blocking — runs the internal asyncio loop. Call from a daemon thread."""
+        self._stream.run()
+
+    def stop(self):
+        self._stream.stop()
+        logger.info("AlpacaStream stopped.")
+
+    # ── internal ─────────────────────────────────────────────────────────────
+
+    async def _handle_bar(self, bar):
+        """
+        Fired by alpaca-py for every completed bar.
+        Normalises to the shared candle dict and forwards to on_bar.
+        """
+        payload = {
+            "symbol": bar.symbol,
+            "time":   int(bar.timestamp.timestamp()),
+            "open":   round(float(bar.open),   4),
+            "high":   round(float(bar.high),   4),
+            "low":    round(float(bar.low),    4),
+            "close":  round(float(bar.close),  4),
+            "volume": int(bar.volume),
+        }
+
+        if asyncio.iscoroutinefunction(self._on_bar):
+            await self._on_bar(payload)
+        else:
+            self._on_bar(payload)

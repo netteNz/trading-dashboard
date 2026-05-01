@@ -10,3 +10,5 @@ alpaca-py==0.26.0
 websocket-client==1.8.0
 eventlet==0.36.1
 requests==2.32.3
+alpaca-py
+python-dotenv

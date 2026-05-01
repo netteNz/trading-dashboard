@@ -1,93 +1,62 @@
 import os
-import json
+import asyncio
 import threading
-import websocket
-from dotenv import load_dotenv
+import logging
+from data.source import AlpacaStream
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
-_ws_thread = None
-_subscribed_symbols: set = set()
-_socketio = None
-
-
-def _build_auth_message() -> str:
-    return json.dumps({
-        "action": "auth",
-        "key":    os.getenv("ALPACA_API_KEY", ""),
-        "secret": os.getenv("ALPACA_SECRET_KEY", ""),
-    })
+_stream: AlpacaStream | None = None
+_thread: threading.Thread | None = None
 
 
-def _build_subscribe_message(symbols: list) -> str:
-    return json.dumps({"action": "subscribe", "trades": symbols})
+def init_stream(socketio, symbol: str = "SPY", feed: str = "iex"):
+    """
+    Starts the Alpaca WebSocket stream in a daemon thread.
+    Safe to call multiple times — only one stream runs at a time.
+    Guards against missing / placeholder keys.
+    """
+    global _stream, _thread
 
+    api_key = os.getenv("ALPACA_API_KEY", "")
+    if not api_key or api_key == "your_alpaca_key_here":
+        logger.warning("Alpaca stream skipped — no API key set.")
+        return
 
-def _on_message(ws, raw: str):
-    global _socketio
-    try:
-        events = json.loads(raw)
-        for event in events:
-            if event.get("T") == "t":          # trade tick
-                _socketio.emit("tick", {
-                    "symbol": event["S"],
-                    "price":  event["p"],
-                    "volume": event["s"],
-                    "time":   event["t"],
-                })
-            elif event.get("T") == "b":        # bar event
-                _socketio.emit("bar", {
-                    "symbol": event["S"],
-                    "open":   event["o"],
-                    "high":   event["h"],
-                    "low":    event["l"],
-                    "close":  event["c"],
-                    "volume": event["v"],
-                    "time":   event["t"],
-                })
-    except Exception as e:
-        print(f"[WS] parse error: {e}")
+    if _thread and _thread.is_alive():
+        logger.info("Stream already running.")
+        return
 
+    def on_bar(bar: dict):
+        """Sync callback — emits to all clients subscribed to that symbol room."""
+        socketio.emit("tick", bar, room=bar["symbol"])
+        logger.debug("tick → %s @ %s", bar["symbol"], bar["time"])
 
-def _on_open(ws):
-    ws.send(_build_auth_message())
-    if _subscribed_symbols:
-        ws.send(_build_subscribe_message(list(_subscribed_symbols)))
-    print("[WS] Alpaca stream connected")
+    _stream = AlpacaStream(on_bar=on_bar, feed=feed)
+    _stream.subscribe(symbol)
 
+    def _run():
+        # StockDataStream.run() spins its own asyncio event loop internally
+        try:
+            _stream.run()
+        except Exception as e:
+            logger.error("Alpaca stream crashed: %s", e)
 
-def _on_error(ws, error):
-    print(f"[WS] error: {error}")
-
-
-def _on_close(ws, *args):
-    print("[WS] stream closed")
-
-
-def start_stream(socketio, symbols: list = None):
-    """Start the Alpaca WebSocket stream in a background thread."""
-    global _ws_thread, _socketio, _subscribed_symbols
-    _socketio = socketio
-    if symbols:
-        _subscribed_symbols.update(s.upper() for s in symbols)
-
-    if _ws_thread and _ws_thread.is_alive():
-        return  # already running
-
-    def run():
-        ws = websocket.WebSocketApp(
-            "wss://stream.data.alpaca.markets/v2/iex",
-            on_open=_on_open,
-            on_message=_on_message,
-            on_error=_on_error,
-            on_close=_on_close,
-        )
-        ws.run_forever(reconnect=5)
-
-    _ws_thread = threading.Thread(target=run, daemon=True)
-    _ws_thread.start()
+    _thread = threading.Thread(target=_run, name="alpaca-ws", daemon=True)
+    _thread.start()
+    logger.info("Alpaca stream started → %s (%s feed)", symbol, feed)
 
 
 def subscribe(symbol: str):
-    """Dynamically subscribe to a new symbol (no-op if stream not started)."""
-    _subscribed_symbols.add(symbol.upper())
+    if _stream:
+        _stream.subscribe(symbol)
+
+
+def unsubscribe(symbol: str):
+    if _stream:
+        _stream.unsubscribe(symbol)
+
+
+def stop():
+    if _stream:
+        _stream.stop()

@@ -102,6 +102,14 @@ def get_presets():
     return jsonify(list(INDICATOR_PRESETS.keys()))
 
 
+@app.route("/api/presets/<name>")
+def get_preset(name: str):
+    indicators = INDICATOR_PRESETS.get(name)
+    if indicators is None:
+        return jsonify({"error": f"Unknown preset: {name}"}), 404
+    return jsonify(indicators)
+
+
 @app.route("/api/search")
 def search():
     q = request.args.get("q", "")

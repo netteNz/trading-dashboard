@@ -234,11 +234,13 @@ export default function TradingChart({ data, lastTick }) {
     return () => { if (cleanup) cleanup(); };
   }, [buildChart]);
 
-  // Live tick update
+  // Live tick update — Alpaca sends completed bars, so update the candlestick series directly
   useEffect(() => {
-    if (!lastTick || !seriesMap.current["__candles__"]) return;
-    // Update the last candle close with the live tick price
-    // (Lightweight Charts v4: updateData on a single bar)
+    const series = seriesMap.current["__candles__"];
+    if (!lastTick || !series) return;
+    const { time, open, high, low, close } = lastTick;
+    if (!time || close == null) return;
+    series.update({ time, open, high, low, close });
   }, [lastTick]);
 
   return (

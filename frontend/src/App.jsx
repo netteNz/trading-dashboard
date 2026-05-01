@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useChartData }  from "./hooks/useChartData";
 import { useWebSocket }  from "./hooks/useWebSocket";
 import TradingChart      from "./components/TradingChart";
@@ -6,48 +6,27 @@ import SymbolSearch      from "./components/SymbolSearch";
 import IndicatorPanel    from "./components/IndicatorPanel";
 import Toolbar           from "./components/Toolbar";
 
-// Mirrors backend INDICATOR_PRESETS — update both when adding new presets
-const INDICATOR_PRESETS = {
-  trend:    [
-    { fn: "ema",    kwargs: { length: 20 } },
-    { fn: "ema",    kwargs: { length: 50 } },
-    { fn: "bbands", kwargs: {} },
-    { fn: "vwap",   kwargs: {} },
-    { fn: "tma",    kwargs: { fast: 3, mid: 7, slow: 20 } },
-  ],
-  momentum: [
-    { fn: "rsi",  kwargs: {} },
-    { fn: "macd", kwargs: {} },
-    { fn: "mom",  kwargs: {} },
-  ],
-  scalp: [
-    { fn: "ema",   kwargs: { length: 9  } },
-    { fn: "ema",   kwargs: { length: 21 } },
-    { fn: "rsi",   kwargs: {} },
-    { fn: "stoch", kwargs: {} },
-  ],
-  full: [
-    { fn: "ema",    kwargs: { length: 20 } },
-    { fn: "ema",    kwargs: { length: 50 } },
-    { fn: "bbands", kwargs: {} },
-    { fn: "rsi",    kwargs: {} },
-    { fn: "macd",   kwargs: {} },
-    { fn: "vwap",   kwargs: {} },
-    { fn: "mom",    kwargs: {} },
-    { fn: "vol",    kwargs: {} },
-  ],
-};
+async function fetchPreset(name) {
+  const res = await fetch(`/api/presets/${name}`);
+  if (!res.ok) throw new Error(`preset ${name} not found`);
+  return res.json();
+}
 
 export default function App() {
   const [symbol,    setSymbol]    = useState("SPY");
   const [timeframe, setTimeframe] = useState("1Day");
   const [preset,    setPreset]    = useState("full");
-  const [indicators, setIndicators] = useState(INDICATOR_PRESETS.full);
+  const [indicators, setIndicators] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Load the default preset from the backend on mount
+  useEffect(() => {
+    fetchPreset("full").then(setIndicators).catch(() => {});
+  }, []);
 
   const handlePresetChange = (p) => {
     setPreset(p);
-    setIndicators(INDICATOR_PRESETS[p] ?? INDICATOR_PRESETS.full);
+    fetchPreset(p).then(setIndicators).catch(() => {});
   };
 
   const { data, loading, error, refetch } = useChartData(symbol, timeframe, indicators);
@@ -58,6 +37,9 @@ export default function App() {
     if (!data?.candles?.length) return null;
     return data.candles[data.candles.length - 1];
   }, [data]);
+
+  // prevClose = last fetched candle close; live ticks are compared against this
+  const prevClose = latestCandle?.close ?? null;
 
   return (
     <div
@@ -125,6 +107,7 @@ export default function App() {
         preset={preset}
         lastTick={lastTick}
         connected={connected}
+        prevClose={prevClose}
         onTimeframeChange={setTimeframe}
         onPresetChange={handlePresetChange}
       />

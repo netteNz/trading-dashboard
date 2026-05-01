@@ -11,10 +11,9 @@ const TIMEFRAMES = [
 const PRESETS = ["trend", "momentum", "scalp", "full"];
 
 export default function Toolbar({ symbol, timeframe, preset, lastTick, connected,
-                                  onTimeframeChange, onPresetChange }) {
-  // Derive last price stats from the tick
-  const price  = lastTick?.price;
-  const isUp   = true; // would be derived from prev close
+                                  onTimeframeChange, onPresetChange, prevClose }) {
+  const price = lastTick?.close ?? null;
+  const isUp  = price != null && prevClose != null ? price >= prevClose : null;
 
   return (
     <div className="flex items-center gap-4 px-4 py-2 bg-surface-1 border-b border-surface-2 select-none">
@@ -27,8 +26,11 @@ export default function Toolbar({ symbol, timeframe, preset, lastTick, connected
             LIVE
           </span>
         )}
-        {price && (
-          <span className="text-sm font-mono text-accent-cyan font-bold ml-2">
+        {price != null && (
+          <span className={`text-sm font-mono font-bold ml-2 ${
+            isUp === true  ? "text-accent-green" :
+            isUp === false ? "text-accent-red"   : "text-accent-cyan"
+          }`}>
             {price.toFixed(2)}
           </span>
         )}

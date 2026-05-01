@@ -37,6 +37,10 @@ INDICATOR_PRESETS = {
     "scalp":    [{"fn": "ema", "kwargs": {"length": 9}}, {"fn": "ema", "kwargs": {"length": 21}},
                  {"fn": "rsi", "kwargs": {}}, {"fn": "stoch", "kwargs": {}}],
     "full":     DEFAULT_INDICATORS,
+    # ── Combo presets ──────────────────────────────────────────────────────────
+    "vrb":    [{"fn": "vwap",  "kwargs": {}},              {"fn": "stoch", "kwargs": {}},           {"fn": "atr", "kwargs": {}}],
+    "mburst": [{"fn": "ema",   "kwargs": {"length": 9}},   {"fn": "ema",   "kwargs": {"length": 21}}, {"fn": "sqz", "kwargs": {}}],
+    "vcs":    [{"fn": "rsi",   "kwargs": {"length": 7}},   {"fn": "vwap",  "kwargs": {}},           {"fn": "atr", "kwargs": {}}],
 }
 
 

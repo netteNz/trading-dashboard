@@ -86,7 +86,7 @@ export default function App() {
             onClick={() => setSidebarOpen(o => !o)}
             className="text-[11px] font-mono text-surface-4 hover:text-accent-cyan px-2 py-1 rounded hover:bg-surface-2 transition-colors"
           >
-            {sidebarOpen ? "« Hide" : "Indicators »"}
+            {sidebarOpen ? "« Hide" : "Panel »"}
           </button>
         </div>
       </header>
@@ -140,27 +140,15 @@ export default function App() {
         {/* Sidebar */}
         {sidebarOpen && (
           <aside
-            className="w-52 bg-surface-1 border-l border-surface-2 overflow-y-auto shrink-0 p-3"
+            className="w-52 bg-surface-1 border-l border-surface-2 overflow-y-auto shrink-0"
             style={{ transition: "width 0.2s ease" }}
           >
             <IndicatorPanel
               active={indicators}
-              onChange={(newList) => {
-                setIndicators(newList);
-                // Convert to preset=custom and reload
-                // The chart re-fetches because we pass indicators as a query param
-              }}
+              onChange={setIndicators}
+              symbol={symbol}
+              onSymbolChange={setSymbol}
             />
-
-            <div className="mt-6 border-t border-surface-2 pt-4">
-              <p className="text-[10px] text-surface-4 uppercase tracking-widest mb-2">Data</p>
-              <div className="text-[11px] font-mono text-surface-4 flex flex-col gap-1">
-                <span>Symbol: <span className="text-accent-cyan">{symbol}</span></span>
-                <span>TF: <span className="text-accent-cyan">{timeframe}</span></span>
-                <span>Bars: <span className="text-accent-yellow">{data?.candles?.length ?? 0}</span></span>
-                <span>Inds: <span className="text-accent-purple">{data?.indicators?.length ?? 0}</span></span>
-              </div>
-            </div>
           </aside>
         )}
       </div>

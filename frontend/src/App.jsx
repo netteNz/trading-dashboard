@@ -6,24 +6,51 @@ import SymbolSearch      from "./components/SymbolSearch";
 import IndicatorPanel    from "./components/IndicatorPanel";
 import Toolbar           from "./components/Toolbar";
 
-const DEFAULT_INDICATORS = [
-  { fn: "ema",    kwargs: { length: 20 } },
-  { fn: "ema",    kwargs: { length: 50 } },
-  { fn: "bbands", kwargs: {} },
-  { fn: "rsi",    kwargs: {} },
-  { fn: "macd",   kwargs: {} },
-  { fn: "vwap",   kwargs: {} },
-  { fn: "vol",    kwargs: {} },
-];
+// Mirrors backend INDICATOR_PRESETS — update both when adding new presets
+const INDICATOR_PRESETS = {
+  trend:    [
+    { fn: "ema",    kwargs: { length: 20 } },
+    { fn: "ema",    kwargs: { length: 50 } },
+    { fn: "bbands", kwargs: {} },
+    { fn: "vwap",   kwargs: {} },
+    { fn: "tma",    kwargs: { fast: 3, mid: 7, slow: 20 } },
+  ],
+  momentum: [
+    { fn: "rsi",  kwargs: {} },
+    { fn: "macd", kwargs: {} },
+    { fn: "mom",  kwargs: {} },
+  ],
+  scalp: [
+    { fn: "ema",   kwargs: { length: 9  } },
+    { fn: "ema",   kwargs: { length: 21 } },
+    { fn: "rsi",   kwargs: {} },
+    { fn: "stoch", kwargs: {} },
+  ],
+  full: [
+    { fn: "ema",    kwargs: { length: 20 } },
+    { fn: "ema",    kwargs: { length: 50 } },
+    { fn: "bbands", kwargs: {} },
+    { fn: "rsi",    kwargs: {} },
+    { fn: "macd",   kwargs: {} },
+    { fn: "vwap",   kwargs: {} },
+    { fn: "mom",    kwargs: {} },
+    { fn: "vol",    kwargs: {} },
+  ],
+};
 
 export default function App() {
   const [symbol,    setSymbol]    = useState("SPY");
   const [timeframe, setTimeframe] = useState("1Day");
   const [preset,    setPreset]    = useState("full");
-  const [indicators, setIndicators] = useState(DEFAULT_INDICATORS);
+  const [indicators, setIndicators] = useState(INDICATOR_PRESETS.full);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  const { data, loading, error, refetch } = useChartData(symbol, timeframe, preset);
+  const handlePresetChange = (p) => {
+    setPreset(p);
+    setIndicators(INDICATOR_PRESETS[p] ?? INDICATOR_PRESETS.full);
+  };
+
+  const { data, loading, error, refetch } = useChartData(symbol, timeframe, indicators);
   const { lastTick, connected }           = useWebSocket(symbol);
 
   // Latest OHLCV from the last candle
@@ -99,7 +126,7 @@ export default function App() {
         lastTick={lastTick}
         connected={connected}
         onTimeframeChange={setTimeframe}
-        onPresetChange={setPreset}
+        onPresetChange={handlePresetChange}
       />
 
       {/* ── Main body ── */}

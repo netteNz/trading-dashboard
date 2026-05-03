@@ -126,6 +126,29 @@ def list_indicators():
     })
 
 
+@app.route("/api/signals/<symbol>")
+def get_rl_signals(symbol: str):
+    # Path to exported signals from the RL repository
+    rl_dir = os.getenv("RL_SIGNALS_DIR", "../../agentic-development/reinforcement-learning-stocks/data/dashboard_signals")
+    
+    # Handle relative paths (relative to dashboard root)
+    if not os.path.isabs(rl_dir):
+        # backend/app.py -> dashboard_root is parent of backend
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        rl_dir = os.path.join(root, rl_dir)
+        
+    file_path = os.path.join(rl_dir, f"{symbol.lower()}_signals.json")
+    
+    if not os.path.exists(file_path):
+        return jsonify({"error": f"Signals not found for {symbol}", "checked_path": file_path}), 404
+        
+    try:
+        with open(file_path, "r") as f:
+            return jsonify(_json.load(f))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── SocketIO events ───────────────────────────────────────────────────────────
 
 @socketio.on("subscribe")

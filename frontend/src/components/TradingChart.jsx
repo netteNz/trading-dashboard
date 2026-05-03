@@ -40,7 +40,7 @@ function lineStyleFromStr(s) {
   return LineStyle.Solid;
 }
 
-export default function TradingChart({ data, lastTick }) {
+export default function TradingChart({ data, lastTick, rlSignals = [] }) {
   const containerRef = useRef(null);
   const chartRef     = useRef(null);
   const seriesMap    = useRef({});
@@ -130,6 +130,22 @@ export default function TradingChart({ data, lastTick }) {
     if (markers.length > 0) {
       markers.sort((a, b) => a.time - b.time);
       candleSeries.setMarkers(markers);
+    }
+
+    // ── RL Signals Overlay ──────────────────────────────────────────────────
+    if (rlSignals && rlSignals.length > 0) {
+      const rlMarkers = rlSignals.map(s => ({
+        time: s.date,
+        position: s.action === 1 ? "belowBar" : "aboveBar",
+        color: s.action === 1 ? "#3fb950" : "#f85149",
+        shape: s.action === 1 ? "arrowUp" : "arrowDown",
+        text: `RL ${Math.round(s.confidence * 100)}%`,
+      }));
+      
+      // Merge with existing markers and re-sort
+      const allMarkers = [...markers, ...rlMarkers];
+      allMarkers.sort((a, b) => a.time - b.time);
+      candleSeries.setMarkers(allMarkers);
     }
 
     // ── Sub-pane charts (pane > 0) ──────────────────────────────────────────
@@ -227,7 +243,7 @@ export default function TradingChart({ data, lastTick }) {
       chart.remove();
       chartRef.current = null;
     };
-  }, [data]);
+  }, [data, rlSignals]);
 
   useEffect(() => {
     const cleanup = buildChart();

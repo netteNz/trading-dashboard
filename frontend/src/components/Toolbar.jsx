@@ -1,3 +1,5 @@
+import ExitControls from "./ExitControls";
+
 const TIMEFRAMES = [
   { value: "1Min",  label: "1m" },
   { value: "5Min",  label: "5m" },
@@ -11,7 +13,7 @@ const TIMEFRAMES = [
 const PRESETS = ["trend", "momentum", "scalp", "full"];
 
 export default function Toolbar({ symbol, timeframe, preset, lastTick, connected,
-                                  onTimeframeChange, onPresetChange, prevClose }) {
+                                  onTimeframeChange, onPresetChange, onToggleRL, prevClose }) {
   const price = lastTick?.close ?? null;
   const isUp  = price != null && prevClose != null ? price >= prevClose : null;
 
@@ -74,6 +76,11 @@ export default function Toolbar({ symbol, timeframe, preset, lastTick, connected
           </button>
         ))}
       </div>
+
+      <div className="h-4 w-px bg-surface-3" />
+      
+      {/* RL Signals Control */}
+      <ExitControls symbol={symbol} onToggleSignals={onToggleRL} />
 
       <div className="ml-auto flex items-center gap-2">
         <span className="text-[10px] font-mono text-surface-4">

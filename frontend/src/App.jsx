@@ -5,6 +5,7 @@ import TradingChart      from "./components/TradingChart";
 import SymbolSearch      from "./components/SymbolSearch";
 import IndicatorPanel    from "./components/IndicatorPanel";
 import Toolbar           from "./components/Toolbar";
+import RLAgentMetrics    from "./components/RLAgentMetrics";
 
 async function fetchPreset(name) {
   const res = await fetch(`/api/presets/${name}`);
@@ -18,15 +19,23 @@ export default function App() {
   const [preset,    setPreset]    = useState("full");
   const [indicators, setIndicators] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [rlMetricsCollapsed, setRlMetricsCollapsed] = useState(false);
+  
 
   // Load the default preset from the backend on mount
   useEffect(() => {
     fetchPreset("full").then(setIndicators).catch(() => {});
   }, []);
 
+  const [rlSignals, setRlSignals] = useState([]);
+
   const handlePresetChange = (p) => {
     setPreset(p);
     fetchPreset(p).then(setIndicators).catch(() => {});
+  };
+
+  const handleToggleRL = (enabled, signals) => {
+    setRlSignals(enabled ? signals : []);
   };
 
   const { data, loading, error, refetch } = useChartData(symbol, timeframe, indicators);
@@ -110,6 +119,7 @@ export default function App() {
         prevClose={prevClose}
         onTimeframeChange={setTimeframe}
         onPresetChange={handlePresetChange}
+        onToggleRL={handleToggleRL}
       />
 
       {/* ── Main body ── */}
@@ -142,17 +152,16 @@ export default function App() {
 
           {data && !loading && (
             <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-              <TradingChart data={data} lastTick={lastTick} />
+              <TradingChart data={data} lastTick={lastTick} rlSignals={rlSignals} />
             </div>
           )}
         </main>
 
-        {/* Sidebar */}
-        {sidebarOpen && (
-          <aside
-            className="w-52 bg-surface-1 border-l border-surface-2 overflow-y-auto shrink-0"
-            style={{ transition: "width 0.2s ease" }}
-          >
+      {/* Sidebar: Indicators + RL Metrics */}
+      {sidebarOpen && (
+        <div className="flex" style={{ transition: "width 0.2s ease" }}>
+          {/* Indicators Panel */}
+          <aside className="w-52 bg-surface-1 border-l border-surface-2 overflow-y-auto shrink-0">
             <IndicatorPanel
               active={indicators}
               onChange={setIndicators}
@@ -160,7 +169,15 @@ export default function App() {
               onSymbolChange={setSymbol}
             />
           </aside>
-        )}
+      
+          {/* RL Agent P&L Panel */}
+          <RLAgentMetrics
+            symbol={symbol}
+            isCollapsed={rlMetricsCollapsed}
+            onToggleCollapse={() => setRlMetricsCollapsed(!rlMetricsCollapsed)}
+          />
+        </div>
+      )}
       </div>
 
       {/* ── Bottom ticker ── */}

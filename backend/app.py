@@ -128,20 +128,30 @@ def list_indicators():
 
 @app.route("/api/signals/<symbol>")
 def get_rl_signals(symbol: str):
-    # Path to exported signals from the RL repository
-    rl_dir = os.getenv("RL_SIGNALS_DIR", "../../agentic-development/reinforcement-learning-stocks/data/dashboard_signals")
-    
-    # Handle relative paths (relative to dashboard root)
-    if not os.path.isabs(rl_dir):
-        # backend/app.py -> dashboard_root is parent of backend
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        rl_dir = os.path.join(root, rl_dir)
-        
-    file_path = os.path.join(rl_dir, f"{symbol.lower()}_signals.json")
-    
-    if not os.path.exists(file_path):
-        return jsonify({"error": f"Signals not found for {symbol}", "checked_path": file_path}), 404
-        
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # Candidate directories in priority order: env override, then both known
+    # relative-sibling paths (macOS agentic-dev and Windows agentic-development)
+    env_override = os.getenv("RL_SIGNALS_DIR")
+    candidates = []
+    if env_override:
+        candidates.append(env_override if os.path.isabs(env_override) else os.path.join(root, env_override))
+    candidates += [
+        os.path.join(root, "../../agentic-dev/reinforcement-learning-stocks/data/dashboard_signals"),
+        os.path.join(root, "../../agentic-development/reinforcement-learning-stocks/data/dashboard_signals"),
+    ]
+
+    file_path = None
+    for d in candidates:
+        p = os.path.normpath(os.path.join(d, f"{symbol.lower()}_signals.json"))
+        if os.path.exists(p):
+            file_path = p
+            break
+
+    if file_path is None:
+        checked = [os.path.normpath(os.path.join(d, f"{symbol.lower()}_signals.json")) for d in candidates]
+        return jsonify({"error": f"Signals not found for {symbol}", "checked_paths": checked}), 404
+
     try:
         with open(file_path, "r") as f:
             return jsonify(_json.load(f))

@@ -12,7 +12,7 @@ const AVAILABLE = [
   { fn: "macd",   label: "MACD",              params: [] },
   { fn: "atr",    label: "ATR",               params: [{ key: "length", label: "Period", default: 14 }] },
   { fn: "stoch",  label: "Stochastic",        params: [] },
-  { fn: "vwap",   label: "VWAP Band",         params: [{ key: "std_mult", label: "Std ×", default: 2 }] },
+  { fn: "vwap",   label: "VWAP Band",         params: [{ key: "std_mult", label: "Std ×", default: 2, int: false }] },
   { fn: "mom",    label: "Mom Oscillator",    params: [{ key: "period",  label: "Period", default: 14 }] },
   { fn: "sqz",    label: "Squeeze Mom",       params: [] },
   { fn: "vol",    label: "Volume Profile",    params: [] },
@@ -114,29 +114,29 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
 
   // ── Indicator helpers ───────────────────────────────────────────────────────
 
-  const isActive = (fn) => active.some(a => a.fn === fn);
+  // An indicator instance is identified by fn + kwargs (EMA 20 ≠ EMA 50).
+  const sameInstance = (a, b) =>
+    a.fn === b.fn && JSON.stringify(a.kwargs ?? {}) === JSON.stringify(b.kwargs ?? {});
+  const hasInstance  = (ind) => active.some(a => sameInstance(a, ind));
+  const hasAnyOf     = (fn)  => active.some(a => a.fn === fn);
 
-  const isComboActive = (combo) =>
-    combo.indicators.every(ci =>
-      active.some(a => a.fn === ci.fn && JSON.stringify(a.kwargs) === JSON.stringify(ci.kwargs))
-    );
+  const isComboActive = (combo) => combo.indicators.every(hasInstance);
 
   const handleLoadCombo = (combo) => {
-    const toAdd = combo.indicators.filter(ci =>
-      !active.some(a => a.fn === ci.fn && JSON.stringify(a.kwargs) === JSON.stringify(ci.kwargs))
-    );
-    onChange([...active, ...toAdd]);
+    onChange([...active, ...combo.indicators.filter(ci => !hasInstance(ci))]);
   };
 
   const handleRemoveCombo = (combo) => {
-    onChange(active.filter(a =>
-      !combo.indicators.some(ci => a.fn === ci.fn && JSON.stringify(a.kwargs) === JSON.stringify(ci.kwargs))
-    ));
+    onChange(active.filter(a => !combo.indicators.some(ci => sameInstance(a, ci))));
+  };
+
+  const addInstance = (ind) => {
+    if (!hasInstance(ind)) onChange([...active, ind]);
   };
 
   const handleAdd = (indicator) => {
     if (indicator.params.length === 0) {
-      onChange([...active, { fn: indicator.fn, kwargs: {} }]);
+      addInstance({ fn: indicator.fn, kwargs: {} });
     } else {
       const defaults = {};
       indicator.params.forEach(p => { defaults[p.key] = p.default; });
@@ -145,10 +145,25 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
     }
   };
 
-  const handleRemove    = (fn) => onChange(active.filter(a => a.fn !== fn));
+  // Remove exactly one row (by position), never every indicator sharing its fn.
+  const handleRemoveAt   = (index) => onChange(active.filter((_, i) => i !== index));
+  // Parameterless indicators can only be active once, so removing by fn is exact.
+  const handleRemoveFn   = (fn)    => onChange(active.filter(a => a.fn !== fn));
+
+  // Empty or invalid inputs fall back to the default; periods are whole numbers ≥ 1.
+  const cleanParams = (indicator, raw) => {
+    const out = {};
+    for (const p of indicator.params) {
+      let v = Number(raw[p.key]);
+      if (!Number.isFinite(v) || v <= 0) v = p.default;
+      out[p.key] = p.int === false ? v : Math.max(1, Math.round(v));
+    }
+    return out;
+  };
+
   const handleConfirmAdd = () => {
     if (!adding) return;
-    onChange([...active, { fn: adding.fn, kwargs: { ...params } }]);
+    addInstance({ fn: adding.fn, kwargs: cleanParams(adding, params) });
     setAdding(null);
     setParams({});
   };
@@ -207,7 +222,8 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
                   {suffix && <span className="text-surface-4">{suffix}</span>}
                 </span>
                 <button
-                  onClick={() => handleRemove(ind.fn)}
+                  onClick={() => handleRemoveAt(i)}
+                  title="Remove"
                   className="text-[10px] text-surface-4 hover:text-accent-red opacity-0 group-hover/row:opacity-100 transition-opacity"
                 >
                   ✕
@@ -274,7 +290,7 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
       {/* ── Indicator groups ────────────────────────────────────────────────── */}
       {GROUPS.map(group => {
         const groupInds   = AVAILABLE.filter(a => group.fns.includes(a.fn));
-        const activeCount = groupInds.filter(a => isActive(a.fn)).length;
+        const activeCount = active.filter(a => group.fns.includes(a.fn)).length;
         return (
           <Section
             key={group.key}
@@ -284,7 +300,10 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
             onToggle={() => toggle(group.key)}
           >
             {groupInds.map(ind => {
-              const on = isActive(ind.fn);
+              const on = hasAnyOf(ind.fn);
+              // Indicators with parameters can be added several times (EMA 9 + EMA 21),
+              // so their row always offers "+"; remove individual ones from Active.
+              const canRemove = on && ind.params.length === 0;
               return (
                 <div
                   key={ind.fn}
@@ -294,14 +313,15 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
                     {ind.label}
                   </span>
                   <button
-                    onClick={() => on ? handleRemove(ind.fn) : handleAdd(ind)}
+                    onClick={() => canRemove ? handleRemoveFn(ind.fn) : handleAdd(ind)}
+                    title={canRemove ? "Remove" : on ? "Add another" : "Add"}
                     className={`text-[10px] font-mono transition-colors ${
-                      on
+                      canRemove
                         ? "text-surface-4 hover:text-accent-red opacity-0 group-hover/item:opacity-100"
                         : "text-surface-4 hover:text-accent-cyan"
                     }`}
                   >
-                    {on ? "✕" : "+"}
+                    {canRemove ? "✕" : "+"}
                   </button>
                 </div>
               );
@@ -320,7 +340,9 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
               <input
                 type="number"
                 value={params[p.key] ?? p.default}
-                onChange={e => setParams(prev => ({ ...prev, [p.key]: Number(e.target.value) }))}
+                min={p.int === false ? 0.1 : 1}
+                step={p.int === false ? 0.1 : 1}
+                onChange={e => setParams(prev => ({ ...prev, [p.key]: e.target.value }))}
                 className="w-full bg-surface-1 border border-surface-3 rounded px-2 py-1 text-xs font-mono text-white outline-none focus:border-accent-cyan"
               />
             </div>

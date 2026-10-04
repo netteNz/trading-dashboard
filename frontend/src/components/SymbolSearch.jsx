@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { apiFetch } from "../lib/api";
 
 const POPULAR = ["SPY", "QQQ", "AAPL", "TSLA", "NVDA", "AMZN", "MSFT", "META"];
 
@@ -18,7 +19,7 @@ export default function SymbolSearch({ value, onChange }) {
     }
     setSearching(true);
     try {
-      const res  = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const res  = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
       const data = res.ok ? await res.json() : [];
       // Merge API results with any POPULAR matches not already returned
       const apiSymbols = new Set(data.map(r => r.symbol));

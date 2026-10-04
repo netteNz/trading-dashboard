@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../lib/api";
 
 /**
  * RL Ensemble Signal Toggle
@@ -14,7 +15,7 @@ export default function ExitControls({ symbol, onToggleSignals }) {
     setError(null);
     try {
       // Fetch from the backend adapter we just implemented
-      const res = await fetch(`/api/signals/${symbol}`);
+      const res = await apiFetch(`/api/signals/${symbol}`);
       if (!res.ok) throw new Error("Not Found");
       const data = await res.json();
       

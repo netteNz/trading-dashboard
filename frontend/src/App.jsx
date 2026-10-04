@@ -6,9 +6,11 @@ import SymbolSearch      from "./components/SymbolSearch";
 import IndicatorPanel    from "./components/IndicatorPanel";
 import Toolbar           from "./components/Toolbar";
 import RLAgentMetrics    from "./components/RLAgentMetrics";
+import { apiFetch }      from "./lib/api";
+import { useAuth }       from "./auth/AuthContext";
 
 async function fetchPreset(name) {
-  const res = await fetch(`/api/presets/${name}`);
+  const res = await apiFetch(`/api/presets/${name}`);
   if (!res.ok) throw new Error(`preset ${name} not found`);
   return res.json();
 }
@@ -20,7 +22,8 @@ export default function App() {
   const [indicators, setIndicators] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [rlMetricsCollapsed, setRlMetricsCollapsed] = useState(false);
-  
+  const { user, logout } = useAuth();
+
 
   // Load the default preset from the backend on mount
   useEffect(() => {
@@ -106,6 +109,23 @@ export default function App() {
           >
             {sidebarOpen ? "« Hide" : "Panel »"}
           </button>
+
+          <div className="h-4 w-px bg-surface-3" />
+
+          <div className="flex items-center gap-2">
+            {user?.avatar_url && (
+              <img src={user.avatar_url} alt="" className="w-5 h-5 rounded-full border border-surface-3" />
+            )}
+            <span className="text-[11px] font-mono text-surface-4 hidden sm:block">{user?.login}</span>
+            {!user?.auth_disabled && (
+              <button
+                onClick={logout}
+                className="text-[11px] font-mono text-surface-4 hover:text-accent-red px-2 py-1 rounded hover:bg-surface-2 transition-colors"
+              >
+                Sign out
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -150,9 +170,16 @@ export default function App() {
             </div>
           )}
 
-          {data && !loading && (
+          {/* Stays mounted while refetching (the spinner overlays it) so zoom survives */}
+          {data && (
             <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-              <TradingChart data={data} lastTick={lastTick} rlSignals={rlSignals} />
+              <TradingChart
+                data={data}
+                lastTick={data.symbol === symbol ? lastTick : null}
+                rlSignals={rlSignals}
+                timeframe={data.timeframe}
+                viewKey={`${data.symbol}|${data.timeframe}`}
+              />
             </div>
           )}
         </main>

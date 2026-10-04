@@ -6,6 +6,7 @@ import {
   PriceScaleMode,
   LineType,
 } from "lightweight-charts";
+import { mergeTick, rlTradeMarkers, TF_SECONDS } from "../lib/bars";
 
 const CHART_THEME = {
   layout: {
@@ -31,8 +32,16 @@ const CHART_THEME = {
     fixLeftEdge:             false,
     lockVisibleTimeRangeOnResize: true,
   },
-  rightPriceScale: { borderColor: "#21262d", mode: PriceScaleMode.Normal },
+  // Same axis width on every stacked chart, otherwise a pane with wider labels
+  // (e.g. volume) gets a narrower plot area and its bars drift out of line.
+  rightPriceScale: { borderColor: "#21262d", mode: PriceScaleMode.Normal, minimumWidth: 80 },
 };
+
+const isVolumeKey = (key) => key === "volume" || key.startsWith("VOL_MA");
+
+// Bars shown on first load of a symbol/timeframe (fitContent squeezed 600 bars
+// into slivers).
+const DEFAULT_VISIBLE_BARS = 150;
 
 function lineStyleFromStr(s) {
   if (s === "dashed") return LineStyle.Dashed;
@@ -40,32 +49,26 @@ function lineStyleFromStr(s) {
   return LineStyle.Solid;
 }
 
-export default function TradingChart({ data, lastTick, rlSignals = [] }) {
+// One point per candle, using whitespace ({ time } only) where the indicator is
+// still warming up. Every series then has the same bar indices as the candles,
+// which keeps the stacked panes aligned when their logical ranges are synced.
+function seriesData(candles, key) {
+  return candles.map(d => (d[key] != null ? { time: d.time, value: d[key] } : { time: d.time }));
+}
+
+export default function TradingChart({ data, lastTick, rlSignals = [], timeframe, viewKey }) {
   const containerRef = useRef(null);
   const chartRef     = useRef(null);
   const seriesMap    = useRef({});
-  const panesRef     = useRef({});   // pane index → pane chart (sub-charts)
+  const panesRef     = useRef({});   // pane index → { chart, el } (sub-charts)
+  const liveBarRef   = useRef(null); // the bar live ticks are merged into
+  const viewRef      = useRef({ key: null, range: null });
 
   const buildChart = useCallback(() => {
     if (!containerRef.current || !data) return;
 
-    // Destroy previous
-    if (chartRef.current) {
-      try {
-        for (const { chart: sub, el } of Object.values(panesRef.current)) {
-          sub.remove();
-          el.remove();
-        }
-        chartRef.current.remove();
-      } catch (e) {
-        console.warn("Error destroying previous chart:", e);
-      }
-      chartRef.current = null;
-      seriesMap.current = {};
-      panesRef.current  = {};
-    }
-
-    const { candles, indicators } = data;
+    const { indicators } = data;
+    const candles = data.candles.filter(d => d.time && d.open != null);
 
     // ── Main chart ──────────────────────────────────────────────────────────
     const totalH = containerRef.current.parentNode ? containerRef.current.parentNode.clientHeight : 500;
@@ -78,7 +81,6 @@ export default function TradingChart({ data, lastTick, rlSignals = [] }) {
     });
     chartRef.current = chart;
 
-    // Candlestick series
     const candleSeries = chart.addCandlestickSeries({
       upColor:          "#22c55e",
       downColor:        "#ef4444",
@@ -87,28 +89,29 @@ export default function TradingChart({ data, lastTick, rlSignals = [] }) {
       wickUpColor:      "#22c55e",
       wickDownColor:    "#ef4444",
     });
-
-    const candleData = candles
-      .filter(d => d.time && d.open != null)
-      .map(d => ({ time: d.time, open: d.open, high: d.high, low: d.low, close: d.close }));
-    candleSeries.setData(candleData);
+    candleSeries.setData(candles.map(d => ({ time: d.time, open: d.open, high: d.high, low: d.low, close: d.close })));
     seriesMap.current["__candles__"] = candleSeries;
 
-    // ── Pane 0 overlays (main chart) ────────────────────────────────────────
+    const last = candles[candles.length - 1];
+    liveBarRef.current = last
+      ? { time: last.time, open: last.open, high: last.high, low: last.low, close: last.close, volume: last.volume }
+      : null;
+
+    // ── Pane 0 overlays (main chart) + markers ──────────────────────────────
     const markers = [];
-    const pane0Indicators = indicators.filter(ind => ind.pane === 0);
-    for (const ind of pane0Indicators) {
+    for (const ind of indicators.filter(i => i.pane === 0)) {
       if (ind.type === "scatter") {
-        const indMarkers = candles
-          .filter(d => d[ind.key] != null)
-          .map(d => ({
+        const buy = ind.key.includes("BUY");
+        for (const d of candles) {
+          if (d[ind.key] == null) continue;
+          markers.push({
             time: d.time,
-            position: ind.key.includes("BUY") ? "belowBar" : "aboveBar",
+            position: buy ? "belowBar" : "aboveBar",
             color: ind.color,
-            shape: ind.key.includes("BUY") ? "arrowUp" : "arrowDown",
+            shape: buy ? "arrowUp" : "arrowDown",
             text: ind.label,
-          }));
-        markers.push(...indMarkers);
+          });
+        }
       } else {
         const series = chart.addLineSeries({
           color:     ind.color,
@@ -119,50 +122,39 @@ export default function TradingChart({ data, lastTick, rlSignals = [] }) {
           priceLineVisible: false,
           lastValueVisible: true,
         });
-        const seriesData = candles
-          .filter(d => d[ind.key] != null)
-          .map(d => ({ time: d.time, value: d[ind.key] }));
-        series.setData(seriesData);
+        series.setData(seriesData(candles, ind.key));
         seriesMap.current[ind.key] = series;
       }
     }
 
-    if (markers.length > 0) {
+    // RL signals are daily decisions; on intraday/weekly charts they'd be
+    // snapped onto the wrong bars, so they're only drawn on 1D.
+    if (timeframe === "1Day" && candles.length) {
+      markers.push(...rlTradeMarkers(rlSignals, candles[0].time, last.time));
+    }
+    if (markers.length) {
       markers.sort((a, b) => a.time - b.time);
       candleSeries.setMarkers(markers);
     }
 
-    // ── RL Signals Overlay ──────────────────────────────────────────────────
-    if (rlSignals && rlSignals.length > 0) {
-      const rlMarkers = rlSignals.map(s => ({
-        time: s.date,
-        position: s.action === 1 ? "belowBar" : "aboveBar",
-        color: s.action === 1 ? "#3fb950" : "#f85149",
-        shape: s.action === 1 ? "arrowUp" : "arrowDown",
-        text: `RL ${Math.round(s.confidence * 100)}%`,
-      }));
-      
-      // Merge with existing markers and re-sort
-      const allMarkers = [...markers, ...rlMarkers];
-      allMarkers.sort((a, b) => a.time - b.time);
-      candleSeries.setMarkers(allMarkers);
-    }
-
-    // ── Sub-pane charts (pane > 0) ──────────────────────────────────────────
-    const subPaneIndices = [...new Set(indicators.filter(i => i.pane > 0).map(i => i.pane))].sort();
+    // ── Sub-pane charts (pane > 0), stacked in ascending pane order ─────────
+    const subPaneIndices = [...new Set(indicators.filter(i => i.pane > 0).map(i => i.pane))]
+      .sort((a, b) => a - b);
     const subH = subPaneIndices.length > 0
       ? Math.round((totalH - mainH) / subPaneIndices.length)
       : 0;
 
+    const allCharts = [chart];
+    let anchor = containerRef.current;
     for (const paneIdx of subPaneIndices) {
       const paneIndicators = indicators.filter(i => i.pane === paneIdx);
-      if (!paneIndicators.length) continue;
 
       const paneEl = document.createElement("div");
-      paneEl.style.width       = "100%";
-      paneEl.style.height      = `${subH}px`;
-      paneEl.style.borderTop   = "1px solid #161b22";
-      containerRef.current.parentNode.insertBefore(paneEl, containerRef.current.nextSibling);
+      paneEl.style.width     = "100%";
+      paneEl.style.height    = `${subH}px`;
+      paneEl.style.borderTop = "1px solid #161b22";
+      anchor.parentNode.insertBefore(paneEl, anchor.nextSibling);
+      anchor = paneEl;
 
       const subChart = createChart(paneEl, {
         ...CHART_THEME,
@@ -171,66 +163,71 @@ export default function TradingChart({ data, lastTick, rlSignals = [] }) {
         timeScale: { ...CHART_THEME.timeScale, visible: false },
       });
       panesRef.current[paneIdx] = { chart: subChart, el: paneEl };
-
-      // Sync time scales
-      chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        if (range) subChart.timeScale().setVisibleLogicalRange(range);
-      });
-      subChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        if (range) chart.timeScale().setVisibleLogicalRange(range);
-      });
+      allCharts.push(subChart);
 
       for (const ind of paneIndicators) {
-        let series;
-        if (ind.type === "histogram") {
-          series = subChart.addHistogramSeries({
-            color:            ind.color,
-            priceLineVisible: false,
-            title:            ind.label,
-          });
-        } else {
-          series = subChart.addLineSeries({
-            color:            ind.color,
-            lineWidth:        1.5,
-            lineStyle:        lineStyleFromStr(ind.lineStyle),
-            lineType:         LineType.Curved,
-            priceLineVisible: false,
-            title:            ind.label,
-          });
-        }
-
-        const seriesData = candles
-          .filter(d => d[ind.key] != null)
-          .map(d => ({ time: d.time, value: d[ind.key] }));
-        series.setData(seriesData);
+        // Volume reads as 46.3M instead of 46306400.00.
+        const fmt = isVolumeKey(ind.key) ? { priceFormat: { type: "volume" } } : {};
+        const series = ind.type === "histogram"
+          ? subChart.addHistogramSeries({ color: ind.color, priceLineVisible: false, title: ind.label, ...fmt })
+          : subChart.addLineSeries({
+              color:            ind.color,
+              lineWidth:        1.5,
+              lineStyle:        lineStyleFromStr(ind.lineStyle),
+              lineType:         LineType.Curved,
+              priceLineVisible: false,
+              title:            ind.label,
+              ...fmt,
+            });
+        series.setData(seriesData(candles, ind.key));
         seriesMap.current[ind.key] = series;
 
-        // Level lines (e.g. RSI 70/30)
-        if (ind.levels) {
-          for (const level of ind.levels) {
-            series.createPriceLine({
-              price:      level.value,
-              color:      level.color,
-              lineWidth:  1,
-              lineStyle:  LineStyle.Dotted,
-              axisLabelVisible: true,
-            });
-          }
+        for (const level of ind.levels ?? []) {
+          series.createPriceLine({
+            price:      level.value,
+            color:      level.color,
+            lineWidth:  1,
+            lineStyle:  LineStyle.Dotted,
+            axisLabelVisible: true,
+          });
         }
       }
     }
 
-    // Fit content
-    chart.timeScale().fitContent();
+    // ── Keep every chart's visible range in sync ────────────────────────────
+    let syncing = false;
+    for (const source of allCharts) {
+      source.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (!range || syncing) return;
+        syncing = true;
+        for (const target of allCharts) {
+          if (target !== source) target.timeScale().setVisibleLogicalRange(range);
+        }
+        syncing = false;
+        if (source === chart) viewRef.current.range = range;
+      });
+    }
+
+    // Same symbol + timeframe (indicator or RL change): keep the user's zoom.
+    // New symbol/timeframe: show the most recent bars.
+    const saved = viewRef.current;
+    if (saved.key === viewKey && saved.range) {
+      chart.timeScale().setVisibleLogicalRange(saved.range);
+    } else if (candles.length > DEFAULT_VISIBLE_BARS) {
+      chart.timeScale().setVisibleLogicalRange({
+        from: candles.length - DEFAULT_VISIBLE_BARS,
+        to:   candles.length + CHART_THEME.timeScale.rightOffset,
+      });
+    } else {
+      chart.timeScale().fitContent();
+    }
+    viewRef.current.key = viewKey;
 
     // Responsive resize
     const ro = new ResizeObserver(() => {
       if (!containerRef.current) return;
       const w = containerRef.current.clientWidth;
-      chart.applyOptions({ width: w });
-      for (const { chart: sub, el } of Object.values(panesRef.current)) {
-        sub.applyOptions({ width: w });
-      }
+      for (const c of allCharts) c.applyOptions({ width: w });
     });
     ro.observe(containerRef.current);
 
@@ -241,23 +238,25 @@ export default function TradingChart({ data, lastTick, rlSignals = [] }) {
         el.remove();
       }
       chart.remove();
-      chartRef.current = null;
+      chartRef.current  = null;
+      seriesMap.current = {};
+      panesRef.current  = {};
     };
-  }, [data, rlSignals]);
+  }, [data, rlSignals, timeframe, viewKey]);
 
-  useEffect(() => {
-    const cleanup = buildChart();
-    return () => { if (cleanup) cleanup(); };
-  }, [buildChart]);
+  useEffect(() => buildChart(), [buildChart]);
 
-  // Live tick update — Alpaca sends completed bars, so update the candlestick series directly
+  // Live ticks are completed 1-minute bars. Fold them into the current bar of
+  // whatever timeframe is shown (or start the next bar) instead of appending
+  // each one as its own candle. Indicator lines update on the next refetch.
   useEffect(() => {
     const series = seriesMap.current["__candles__"];
     if (!lastTick || !series) return;
-    const { time, open, high, low, close } = lastTick;
-    if (!time || close == null) return;
-    series.update({ time, open, high, low, close });
-  }, [lastTick]);
+    const merged = mergeTick(liveBarRef.current, lastTick, TF_SECONDS[timeframe]);
+    if (!merged) return;
+    liveBarRef.current = merged;
+    series.update({ time: merged.time, open: merged.open, high: merged.high, low: merged.low, close: merged.close });
+  }, [lastTick, timeframe]);
 
   return (
     <div

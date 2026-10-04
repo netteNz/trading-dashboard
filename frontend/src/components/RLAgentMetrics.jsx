@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../lib/api";
 
 /**
  * RL Agent P&L Panel
@@ -15,7 +16,7 @@ export default function RLAgentMetrics({ symbol, isCollapsed, onToggleCollapse }
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/signals/${symbol}`);
+      const res = await apiFetch(`/api/signals/${symbol}`);
       if (!res.ok) throw new Error("Metrics not found");
       const data = await res.json();
       setMetrics(data);

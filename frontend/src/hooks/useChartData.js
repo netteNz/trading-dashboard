@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-const BASE = "";  // Vite proxy handles /api → localhost:5000
+import { apiFetch } from "../lib/api";
+
+const BASE = "";  // same origin: Vite proxy in dev, Flask in the container
 
 export function useChartData(symbol, timeframe, indicators) {
   const [data,    setData]    = useState(null);
@@ -22,10 +24,12 @@ export function useChartData(symbol, timeframe, indicators) {
 
     try {
       const url = `${BASE}/api/chart/${symbol}?tf=${timeframe}&limit=600&indicators=${encodeURIComponent(indicatorsJson)}`;
-      const res = await fetch(url, { signal: abortRef.current.signal });
+      const res = await apiFetch(url, { signal: abortRef.current.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      setData(json);
+      // Tag the payload with what it was fetched for, so the chart can tell an
+      // indicator change (keep zoom) from a new symbol/timeframe (reset view).
+      setData({ ...json, symbol, timeframe });
     } catch (e) {
       if (e.name !== "AbortError") setError(e.message);
     } finally {

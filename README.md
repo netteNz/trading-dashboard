@@ -60,22 +60,42 @@ cd frontend && npm run dev
 # Both via Docker
 cp backend/.env.example backend/.env
 docker compose up --build
+
+# Backend tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest tests -q
 ```
+
+All `/api/*` routes (except `/api/health`) and the Socket.IO connection require sign-in: GitHub OAuth →
+app-issued JWT cookies (`backend/auth.py`). For local work set `AUTH_DISABLED=1` in `backend/.env`
+(the `.env.example` default); without either, `/api/*` answers 503.
+
+**Deploying:** single container on Azure Container Apps for ≈ $0/month — see [docs/DEPLOY_AZURE.md](docs/DEPLOY_AZURE.md).
 
 ---
 
 ## API
 
-| Method | Route                | Params                                                                  | Returns                        |
-|--------|----------------------|-------------------------------------------------------------------------|--------------------------------|
-| GET    | `/api/chart/:symbol` | `tf` (default `1Day`), `limit` (default `500`), `preset`, `indicators` | `{ candles[], indicators[] }`  |
-| GET    | `/api/presets`       | —                                                                       | `string[]`                     |
-| GET    | `/api/indicators`    | —                                                                       | `{ standard[], custom[] }`     |
-| GET    | `/api/search?q=`     | `q`                                                                     | `{ symbol, name, exchange }[]` |
+| Method | Route                    | Params                                                                  | Returns                        |
+|--------|--------------------------|---------------------------------------------------------------------------|--------------------------------|
+| GET    | `/api/health`            | — (public)                                                              | `{ status, provider, stream }` |
+| GET    | `/api/chart/:symbol`     | `tf` (default `1Day`), `limit` (default `500`, max `5000`), `preset`, `indicators` | `{ candles[], indicators[], warnings[] }` |
+| GET    | `/api/presets`           | —                                                                       | `string[]`                     |
+| GET    | `/api/presets/:name`     | —                                                                       | indicator list, or 404         |
+| GET    | `/api/indicators`        | —                                                                       | `{ standard[], custom[] }`     |
+| GET    | `/api/search?q=`         | `q`                                                                     | `{ symbol, name, exchange }[]` |
+| GET    | `/api/signals/:symbol`   | —                                                                       | RL ensemble signals JSON, or 404 |
 
 `tf` values: `1Min` `5Min` `15Min` `30Min` `1Hour` `1Day` `1Week`
 
-`preset` values: `trend` `momentum` `scalp` `full`
+`preset` values: `trend` `momentum` `scalp` `full` `vrb` `mburst` `vcs`
+
+### Socket.IO events
+
+| Direction | Event         | Payload         | Notes                                  |
+|-----------|---------------|-----------------|-----------------------------------------|
+| client→server | `subscribe`   | `{ symbol }`    | joins the symbol's room, starts the feed |
+| client→server | `unsubscribe` | `{ symbol }`    | leaves the room                         |
+| server→client | `tick`        | OHLCV bar dict  | emitted to the symbol's room            |
 
 `indicators` param: JSON array — `[{"fn":"ema","kwargs":{"length":20}}]`
 
@@ -121,7 +141,7 @@ def add_<name>(self, period: int = 14) -> "IndicatorEngine":
 **3. Wire** in `backend/app.py` inside `_build_engine()`:
 
 ```python
-elif fn == "<shortname>": engine.add_<name>(**kw)
+"<shortname>": ("add_<name>", {"<kwarg>": (int, 1, 500)}),
 ```
 
 Then expose in `frontend/src/components/IndicatorPanel.jsx` by appending to `AVAILABLE`:

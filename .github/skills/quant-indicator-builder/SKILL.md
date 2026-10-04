@@ -178,7 +178,7 @@ SERIES_META = {
 In `_build_engine()`, add an `elif` branch for the new fn key:
 
 ```python
-elif fn == "<key>":   engine.add_<indicator>(**kw)
+"<key>": ("add_<indicator>", {"<kwarg>": (int, 1, 500)}),   # INDICATORS registry in app.py
 ```
 
 In `INDICATOR_PRESETS`, add to relevant presets or define a new one:
@@ -333,7 +333,7 @@ result["HIST_COLOR"] = np.where(hist >= 0, "#3fb950", "#f85149")
    - SERIES_META["RSX_14"] = { "pane": 2, "type": "line", "color": "#d2a8ff" }
 
 3. app.py
-   - elif fn == "rsx": engine.add_rsx(**kw)
+   - "rsx": ("add_rsx", {"length": (int, 2, 500)}) in the INDICATORS registry
    - Add to "momentum" preset
 
 4. IndicatorPanel.jsx

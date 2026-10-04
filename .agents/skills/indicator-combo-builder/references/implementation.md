@@ -76,7 +76,7 @@ def add_<name>(self, period: int = 14) -> "IndicatorEngine":
 
 In `_build_engine()`:
 ```python
-elif fn == "<key>": engine.add_<name>(**kw)
+"<key>": ("add_<name>", {"<kwarg>": (int, 1, 500)}),   # INDICATORS registry in app.py
 ```
 
 Add to relevant preset(s):

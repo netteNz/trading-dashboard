@@ -35,7 +35,7 @@ Chart initialises at the far-left of the data range on first load.
 - [ ] **Signal overlay on chart** — render buy/sell markers from RL signals on the candlestick pane in TradingChart.jsx; colour-code by ensemble confidence
 - [ ] **Win rate metric** — add `win_rate_pct` to export script: `(trades_won / total_trades) * 100`
 - [ ] **Live signal refresh** — schedule export script hourly (Windows Task Scheduler or cron); add auto-refresh + "Last updated" timestamp in panel
-- [ ] **Toolbar price direction** — replace hardcoded `isUp = true` with prev-close comparison
+- [x] **Toolbar price direction** — replace hardcoded `isUp = true` with prev-close comparison (done: `Toolbar.jsx:18` compares `price` against `prevClose`)
 
 ### LOW
 

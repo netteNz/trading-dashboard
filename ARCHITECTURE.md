@@ -1,6 +1,6 @@
 # Trading Dashboard — Architecture
 
-> Stack: React 18 + Vite 5 · Flask 3 + Flask-SocketIO · Python 3.13
+> Stack: React 18 + Vite 5 · Flask 3 + Flask-SocketIO · Python 3.11+
 
 ---
 
@@ -272,7 +272,7 @@ docker compose up --build
 
 1. `backend/indicators/custom/<name>.py` — fn signature: `(df: DataFrame, **kwargs) → DataFrame`
 2. `backend/indicators/engine.py` — add `add_<name>()` method, append to `_indicator_meta`
-3. `backend/app.py` (`_build_engine`) — add `elif fn == "<shortname>": engine.add_<name>(**kw)`
+3. `backend/app.py` (`_build_engine`) — add `"<shortname>": ("add_<name>", {<kwarg schema>})` to the `INDICATORS` registry
 4. `frontend/src/components/IndicatorPanel.jsx` — append `{ fn, label, params }` to `AVAILABLE`
 
 ### Add a New Preset (4 touch points)
@@ -298,7 +298,7 @@ docker compose up --build
 | Charts | Lightweight Charts | ^4.2.0 |
 | Styling | Tailwind CSS | ^3.4.10 |
 | WS client | socket.io-client | ^4.7.5 |
-| Backend runtime | Python | 3.13.x |
+| Backend runtime | Python | 3.11+ (see `backend/Dockerfile`) |
 | Web server | Flask + Flask-SocketIO | 3.0.3 / 5.3.6 |
 | Indicators | pandas-ta | 0.4.71b0 |
 | Data (default) | yfinance | ≥1.3.0 |
@@ -317,6 +317,3 @@ docker compose up --build
 - **Socket singleton**: `useWebSocket` holds a module-level `_socket`; only one socket instance exists regardless of React re-renders.
 - **AbortController**: `useChartData` cancels in-flight fetch on symbol/timeframe/indicator change — removing this causes race conditions on rapid changes.
 - **Preset sync**: `INDICATOR_PRESETS` is defined in both `backend/app.py` and `frontend/src/App.jsx` — both must be updated when adding or changing presets.
-- **Docker**: frontend service references a `Dockerfile` that doesn't exist in `frontend/`; treat Docker config as a starting point only.
-- **`TradingChart` live tick**: `lastTick` update block is stubbed (no-op comment in `useEffect`).
-- **`Toolbar` price direction**: `isUp` is hardcoded `true`; needs prev-close comparison to be accurate.

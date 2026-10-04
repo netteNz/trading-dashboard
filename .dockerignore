@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+.agents
+**/venv
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.env
+frontend/dist
+backend/tests
+*.md
+!README.md

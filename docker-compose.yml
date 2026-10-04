@@ -1,5 +1,6 @@
-version: "3.9"
-
+# Local dev with live reload of both halves (Vite on :3000, Flask on :5000).
+# For the production-style single container, see the root Dockerfile and
+# docs/DEPLOY_AZURE.md.
 services:
   backend:
     build:
@@ -9,6 +10,8 @@ services:
       - "5000:5000"
     env_file:
       - ./backend/.env
+    environment:
+      - FLASK_HOST=0.0.0.0
     volumes:
       - ./backend:/app
     command: python app.py

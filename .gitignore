@@ -22,3 +22,9 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# ── DocGraph scratch output ────────────────────────────────────────────────────
+docgraph-context.md
+
+# -- Crash dumps --
+*.stackdump

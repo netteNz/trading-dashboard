@@ -3,7 +3,7 @@ import asyncio
 import logging
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,6 +30,18 @@ PERIOD_MAP_YF = {
     "1Hour": "730d",
     "1Day":  "5y",
     "1Week": "10y",
+}
+
+# How far back to start an Alpaca bar query. Generous enough that `limit` bars
+# (up to a few thousand) fit inside the window, including weekends/holidays.
+LOOKBACK_ALPACA = {
+    "1Min":  timedelta(days=10),
+    "5Min":  timedelta(days=45),
+    "15Min": timedelta(days=90),
+    "30Min": timedelta(days=180),
+    "1Hour": timedelta(days=365 * 2),
+    "1Day":  timedelta(days=365 * 6),
+    "1Week": timedelta(days=365 * 15),
 }
 
 
@@ -75,6 +87,8 @@ class DataSource:
         return df.tail(limit)
 
     def _get_bars_alpaca(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+        from alpaca.common.enums import Sort
+        from alpaca.data.enums import DataFeed
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
@@ -85,19 +99,27 @@ class DataSource:
             "30Min": TimeFrame(30, TimeFrameUnit.Minute),
             "1Hour": TimeFrame(1,  TimeFrameUnit.Hour),
             "1Day":  TimeFrame(1,  TimeFrameUnit.Day),
+            "1Week": TimeFrame(1,  TimeFrameUnit.Week),
         }
 
         client = self._get_alpaca()
         request = StockBarsRequest(
             symbol_or_symbols=symbol,
             timeframe=tf_map.get(timeframe, TimeFrame(1, TimeFrameUnit.Day)),
-            start=datetime.utcnow() - timedelta(days=365 * 2),
+            start=datetime.now(timezone.utc) - LOOKBACK_ALPACA.get(timeframe, timedelta(days=365 * 6)),
             limit=limit,
+            # Newest first: with the default ascending sort, `limit` keeps the
+            # *oldest* bars after `start`, and intraday charts showed stale data.
+            sort=Sort.DESC,
+            feed=DataFeed.SIP if os.getenv("ALPACA_FEED", "iex").lower() == "sip" else DataFeed.IEX,
         )
         bars = client.get_stock_bars(request).df
+        # An empty response has a plain RangeIndex with no "timestamp" level.
+        if bars.empty:
+            raise ValueError(f"No data returned for {symbol}")
         bars.index = bars.index.get_level_values("timestamp")
         bars.index = pd.to_datetime(bars.index, utc=True)
-        bars = bars[["open", "high", "low", "close", "volume"]].dropna()
+        bars = bars[["open", "high", "low", "close", "volume"]].dropna().sort_index()
         return bars.tail(limit)
 
     def search_symbols(self, query: str) -> list:

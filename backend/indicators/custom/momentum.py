@@ -34,8 +34,7 @@ def squeeze_momentum(df: pd.DataFrame, bb_period: int = 20, kc_period: int = 20,
 
     Columns added:
         SQZ_VAL    — momentum value (histogram)
-        SQZ_ON     — True when squeeze is active (BB inside KC)
-        SQZ_OFF    — True when squeeze just fired
+        SQZ_ON     — 1.0 when squeeze is active (BB inside KC), else 0.0
     """
     close = df["close"]
     high  = df["high"]

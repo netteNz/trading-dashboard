@@ -10,7 +10,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: Python runtime ──────────────────────────────────────────────────
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

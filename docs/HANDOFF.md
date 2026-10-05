@@ -2,12 +2,13 @@
 
 Phases A (backend correctness), B (chart fixes), the auth gate and the container/Azure
 packaging are committed. Azure resources are **not** created yet; see `docs/DEPLOY_AZURE.md`.
-Phase D (correcting and merging `FINDINGS.md`) comes after Phase C. `FINDINGS.md` is not committed yet.
+Phase D (correcting and merging `FINDINGS.md`) comes after Phase C. `FINDINGS.md` is committed but not yet corrected.
 
 ## Setting up on a new machine (macOS)
 
 ```bash
 git pull
+# needs Python 3.12+ (pandas-ta 0.4.x); check python3 --version, else e.g. brew install python@3.13
 cd backend && python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
 cp .env.example .env          # .env is gitignored; set AUTH_DISABLED=1 for local dev

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Stack
 
-- **Backend**: Flask + Flask-SocketIO (`async_mode="threading"`, `backend/app.py`) — Python 3.11+
+- **Backend**: Flask + Flask-SocketIO (`async_mode="threading"`, `backend/app.py`) — Python 3.12+ (pandas-ta 0.4.x requires it; CI and the image use 3.13)
 - **Frontend**: React 18 + Vite + Lightweight Charts v4 + Tailwind CSS (`frontend/`)
 - **Indicators**: pandas-ta (standard) + custom modules (`backend/indicators/custom/`)
 - **Data**: yfinance (default, no keys) or Alpaca REST (requires env vars)

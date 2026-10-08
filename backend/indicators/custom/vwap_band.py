@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-ANCHORS = ("session", "rolling")
+ANCHORS = ("session", "utc", "rolling")
 
 
 def vwap_band(df: pd.DataFrame, std_mult: float = 2.0, period: int = 20,
@@ -12,6 +12,7 @@ def vwap_band(df: pd.DataFrame, std_mult: float = 2.0, period: int = 20,
     anchor="session" — resets at the start of each trading session (US calendar
         day). Correct for intraday bars; a running cumsum across the whole
         fetched history would drift further from price the more days are loaded.
+    anchor="utc" — resets at 00:00 UTC, the daily open for 24/7 crypto markets.
     anchor="rolling" — volume-weighted mean of the last `period` bars. Used for
         daily/weekly bars, where each session is a single bar and a
         session-anchored VWAP would collapse onto the bar's typical price.
@@ -36,7 +37,8 @@ def vwap_band(df: pd.DataFrame, std_mult: float = 2.0, period: int = 20,
         # session date so the boundary falls at US midnight, not UTC midnight
         # (matters for any pre/post-market bars that cross the UTC day rollover).
         if idx.tz is not None:
-            idx = idx.tz_convert("America/New_York").tz_localize(None)
+            tz = "UTC" if anchor == "utc" else "America/New_York"
+            idx = idx.tz_convert(tz).tz_localize(None)
         session = idx.normalize()
 
         cum_vol    = df["volume"].groupby(session).cumsum()

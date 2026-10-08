@@ -9,6 +9,7 @@ from indicators.custom.momentum  import momentum_oscillator, squeeze_momentum
 from indicators.custom.triple_ma import triple_ma
 from indicators.custom.regime    import market_regime, REGIME_COLORS
 from indicators.custom.combo_signals import combo_signals
+from indicators.custom.signal_stats import score_markers
 
 
 class IndicatorEngine:
@@ -35,6 +36,7 @@ class IndicatorEngine:
     def __init__(self, df: pd.DataFrame):
         self.df = df.copy()
         self._indicator_meta: list[dict] = []
+        self._signal_cols: list[tuple[str, str, str]] = []   # (label, buy col, sell col)
 
     # ── Standard indicators (pandas-ta) ──────────────────────────────────────
 
@@ -196,7 +198,7 @@ class IndicatorEngine:
         sfx = self._suffix("VWAP")
         result = vwap_band(self.df, std_mult=std_mult, period=period, anchor=anchor)
         self._concat(result, sfx)
-        label = "VWAP" if anchor == "session" else f"VWAP ({period})"
+        label = {"session": "VWAP", "utc": "VWAP (UTC)"}.get(anchor, f"VWAP ({period})")
         self._indicator_meta.append({"key": "VWAP"       + sfx, "type": "line", "pane": 0, "color": "#f0883e", "label": label})
         self._indicator_meta.append({"key": "VWAP_UPPER" + sfx, "type": "line", "pane": 0, "color": "#f0883e44", "label": "VWAP Upper", "lineStyle": "dashed"})
         self._indicator_meta.append({"key": "VWAP_LOWER" + sfx, "type": "line", "pane": 0, "color": "#f0883e44", "label": "VWAP Lower", "lineStyle": "dashed"})
@@ -251,6 +253,22 @@ class IndicatorEngine:
                                      "color": "#3fb950", "label": name})
         self._indicator_meta.append({"key": f"SIG_{name}_SELL{sfx}", "type": "scatter", "pane": 0,
                                      "color": "#f85149", "label": name})
+        self._signal_cols.append((name + sfx, f"SIG_{name}_BUY{sfx}", f"SIG_{name}_SELL{sfx}"))
+        return self
+
+    # ── Scorecard / trimming ──────────────────────────────────────────────────
+
+    def signal_stats(self, horizon: int = 10, last: int | None = None) -> dict:
+        """In-sample scorecard per combo on the chart (see signal_stats.py).
+        Call before tail(): the forward bars and the ATR warm-up are needed."""
+        return {label: score_markers(self.df, self.df[buy].notna(), self.df[sell].notna(),
+                                     horizon=horizon, last=last)
+                for label, buy, sell in self._signal_cols}
+
+    def tail(self, n: int) -> "IndicatorEngine":
+        """Keep the last n rows: indicators are computed on extra warm-up bars,
+        then trimmed so only the requested window is sent."""
+        self.df = self.df.tail(n)
         return self
 
     # ── Generic passthrough ───────────────────────────────────────────────────

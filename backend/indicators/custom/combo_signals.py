@@ -142,9 +142,80 @@ def _vcs(df, anchor="session", **_):
     return _cross_above(c, vwap) & (rsi7 > 50), _cross_below(c, vwap) & (rsi7 < 50)
 
 
+# ── crypto (24/7) rules ───────────────────────────────────────────────────────
+
+def _bmsb(df, **_):
+    """Bull Market Support Band: SMA 20 + EMA 21 (the BTC cycle reference on 1W)."""
+    c = df["close"]
+    s20, e21 = ta.sma(c, 20), ta.ema(c, 21)
+    top, bottom = pd.concat([s20, e21], axis=1).max(axis=1), pd.concat([s20, e21], axis=1).min(axis=1)
+    return _cross_above(c, top), _cross_below(c, bottom)
+
+
+def _cpb(df, **_):
+    """Trend pullback: in an EMA 21/55 trend, RSI dips past 40 (60) and reclaims it.
+    Crypto trends ride RSI 70+, so fading extremes fails; buying dips in trend doesn't."""
+    c = df["close"]
+    e21, e55 = ta.ema(c, 21), ta.ema(c, 55)
+    rsi = ta.rsi(c, 14)
+    return (e21 > e55) & _cross_above(rsi, 40), (e21 < e55) & _cross_below(rsi, 60)
+
+
+def _uvb(df, anchor="utc", **_):
+    """Breakout through the UTC-day VWAP band with ADX trend and expanding ATR.
+    (No volume-spike filter: single-venue crypto volume is too thin to trust.)"""
+    c = df["close"]
+    vw = vwap_band(df, anchor=anchor)
+    adx = _adx(df)
+    atr = ta.atr(df["high"], df["low"], c, 14)
+    expanding = (adx > 20) & (atr > atr.rolling(20).mean())
+    return (_cross_above(c, vw["VWAP_UPPER"]) & expanding), (_cross_below(c, vw["VWAP_LOWER"]) & expanding)
+
+
+# ── divergence (both markets) ─────────────────────────────────────────────────
+
+def _divergence(price: pd.Series, rsi: pd.Series, k: int, min_gap: int, max_gap: int,
+                lows: bool) -> pd.Series:
+    """
+    True on the bar that confirms a pivot (k bars after it) whose price makes a
+    new extreme vs the previous pivot while RSI does not.
+
+    A pivot at p = t - k is confirmed at t when price[p] is the extreme of
+    p-k … p+k: that window ends at t, so only bars up to t are used. The
+    previous pivot is the last one confirmed strictly before t.
+    """
+    roll = price.rolling(2 * k + 1)
+    conf = price.shift(k) == (roll.min() if lows else roll.max())
+    conf &= rsi.shift(k).notna()
+
+    pos = pd.Series(range(len(price)), index=price.index, dtype=float)
+    piv_price = price.shift(k).where(conf)
+    piv_rsi   = rsi.shift(k).where(conf)
+    piv_pos   = (pos - k).where(conf)
+    prev_price = piv_price.ffill().shift(1)
+    prev_rsi   = piv_rsi.ffill().shift(1)
+    prev_pos   = piv_pos.ffill().shift(1)
+
+    gap = piv_pos - prev_pos
+    if lows:
+        div = (piv_price < prev_price) & (piv_rsi > prev_rsi) & (piv_rsi < 50)
+    else:
+        div = (piv_price > prev_price) & (piv_rsi < prev_rsi) & (piv_rsi > 50)
+    return conf & div & gap.between(min_gap, max_gap)
+
+
+def _rdiv(df, k=3, min_gap=5, max_gap=60, **_):
+    """Confirmed RSI divergence: lower price low + higher RSI low → BUY, mirror → SELL.
+    Marked k bars after the swing, when the pivot is known, so it never repaints."""
+    rsi = ta.rsi(df["close"], 14)
+    return (_divergence(df["low"],  rsi, k, min_gap, max_gap, lows=True),
+            _divergence(df["high"], rsi, k, min_gap, max_gap, lows=False))
+
+
 SIGNAL_RULES = {
     "ttp": _ttp, "tsf": _tsf, "ksqz": _ksqz, "bbrsi": _bbrsi, "osc": _osc,
     "tmt": _tmt, "wvs": _wvs, "vrb": _vrb, "mburst": _mburst, "vcs": _vcs,
+    "bmsb": _bmsb, "cpb": _cpb, "uvb": _uvb, "rdiv": _rdiv,
 }
 
 

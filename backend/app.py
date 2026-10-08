@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from auth import init_auth, socket_user
 from data.source import DataSource
+from markets import MARKETS, is_crypto
 from indicators.engine import IndicatorEngine
 from indicators.custom.vwap_band import ANCHORS as VWAP_ANCHORS
 from indicators.custom.combo_signals import SIGNAL_RULES
@@ -46,6 +47,11 @@ init_auth(app)
 ds = DataSource()
 
 MAX_LIMIT = 5000
+# Extra bars fetched ahead of the displayed window so long indicators (SMA 200,
+# EMA 55, regime) are warmed up from the first visible bar; trimmed before sending.
+WARMUP_BARS = 250
+# Scorecard: how many bars after a marker are measured.
+HORIZON_BARS = 10
 INTRADAY_TIMEFRAMES = {"1Min", "5Min", "15Min", "30Min", "1Hour"}
 
 # ── Indicator registry ────────────────────────────────────────────────────────
@@ -119,36 +125,53 @@ INDICATOR_PRESETS = {
     "mburst": _combo("mburst", _i("ema", length=9), _i("ema", length=21), _i("sqz"), _i("vol")),
     "vcs":    _combo("vcs", _i("rsi", length=7), _i("vwap"), _i("atr")),
     "regime": [_i("mrd"), _i("adx"), _i("atr")],
+    # ── Crypto combos (24/7: UTC-day VWAP, trend-pullback RSI) ──────────────────
+    "bmsb":   _combo("bmsb", _i("sma", length=20), _i("ema", length=21), _i("atr")),
+    "cpb":    _combo("cpb", _i("ema", length=21), _i("ema", length=55), _i("rsi"), _i("atr")),
+    "uvb":    _combo("uvb", _i("vwap"), _i("adx"), _i("atr")),
+    # ── Both markets ────────────────────────────────────────────────────────────
+    "rdiv":   _combo("rdiv", _i("rsi"), _i("atr")),
 }
 
 # Display info for every preset — the one place the UI gets labels from.
+# "markets" picks which market toggle(s) list it. Volume-spike combos stay
+# stocks-only: single-venue crypto volume (Alpaca) is too thin to trust.
+_BOTH, _STOCKS, _CRYPTO = ["stocks", "crypto"], ["stocks"], ["crypto"]
 PRESET_INFO = {
-    "trend":    {"kind": "core",  "label": "Trend",    "desc": "EMA 20/50, BB, VWAP, Triple MA", "tf": "any"},
-    "momentum": {"kind": "core",  "label": "Momentum", "desc": "RSI, MACD, Mom Osc",             "tf": "any"},
-    "scalp":    {"kind": "core",  "label": "Scalp",    "desc": "EMA 9/21, RSI, Stoch",           "tf": "1m–15m"},
-    "full":     {"kind": "core",  "label": "Full",     "desc": "Default overview",               "tf": "any"},
-    "ttp":    {"kind": "combo", "label": "Triple Trend Pulse",    "tf": "1H, 1D",
+    "trend":    {"kind": "core", "markets": _BOTH,  "label": "Trend",    "desc": "EMA 20/50, BB, VWAP, Triple MA", "tf": "any"},
+    "momentum": {"kind": "core", "markets": _BOTH,  "label": "Momentum", "desc": "RSI, MACD, Mom Osc",             "tf": "any"},
+    "scalp":    {"kind": "core", "markets": _BOTH,  "label": "Scalp",    "desc": "EMA 9/21, RSI, Stoch",           "tf": "1m–15m"},
+    "full":     {"kind": "core", "markets": _BOTH,  "label": "Full",     "desc": "Default overview",               "tf": "any"},
+    "ttp":    {"kind": "combo", "markets": _BOTH, "label": "Triple Trend Pulse",    "tf": "1H, 1D",
                "desc": "Stacked EMA 9/21/55 + RSI 50 cross"},
-    "tsf":    {"kind": "combo", "label": "Trend Strength Filter", "tf": "1D",
+    "tsf":    {"kind": "combo", "markets": _BOTH, "label": "Trend Strength Filter", "tf": "1D",
                "desc": "EMA 20/50 trend, ADX > 25, MACD flip"},
-    "ksqz":   {"kind": "combo", "label": "Keltner Squeeze",       "tf": "15m, 1H",
+    "ksqz":   {"kind": "combo", "markets": _BOTH, "label": "Keltner Squeeze",       "tf": "15m, 1H",
                "desc": "BB inside KC, breakout on release"},
-    "bbrsi":  {"kind": "combo", "label": "BB-RSI Reversal",       "tf": "1H, 1D",
+    "bbrsi":  {"kind": "combo", "markets": _STOCKS, "label": "BB-RSI Reversal",       "tf": "1H, 1D",
                "desc": "Band tag + RSI extreme + volume spike"},
-    "osc":    {"kind": "combo", "label": "Oversold Confluence",   "tf": "1D",
+    "osc":    {"kind": "combo", "markets": _STOCKS, "label": "Oversold Confluence",   "tf": "1D",
                "desc": "RSI, MFI and BB all at extremes"},
-    "tmt":    {"kind": "combo", "label": "Triple MA Trend",       "tf": "1D",
+    "tmt":    {"kind": "combo", "markets": _STOCKS, "label": "Triple MA Trend",       "tf": "1D",
                "desc": "SMA 50/100/200 stack + MACD + RSI band"},
-    "wvs":    {"kind": "combo", "label": "Wyckoff Volume",        "tf": "1D",
+    "wvs":    {"kind": "combo", "markets": _STOCKS, "label": "Wyckoff Volume",        "tf": "1D",
                "desc": "CMF zero cross confirmed by OBV"},
-    "vrb":    {"kind": "combo", "label": "VWAP Rubber Band",      "tf": "5m, 15m",
+    "vrb":    {"kind": "combo", "markets": _BOTH, "label": "VWAP Rubber Band",      "tf": "5m, 15m",
                "desc": "Mean reversion from VWAP bands"},
-    "mburst": {"kind": "combo", "label": "Momentum Burst",        "tf": "1m, 5m",
+    "mburst": {"kind": "combo", "markets": _STOCKS, "label": "Momentum Burst",        "tf": "1m, 5m",
                "desc": "EMA ribbon + squeeze flip + volume"},
-    "vcs":    {"kind": "combo", "label": "VWAP Cross Scalp",      "tf": "1m, 5m",
+    "vcs":    {"kind": "combo", "markets": _BOTH, "label": "VWAP Cross Scalp",      "tf": "1m, 5m",
                "desc": "VWAP cross with RSI 7 momentum"},
-    "regime": {"kind": "combo", "label": "Market Regime",         "tf": "1D",
+    "regime": {"kind": "combo", "markets": _BOTH, "label": "Market Regime",         "tf": "1D",
                "desc": "Trend / range / high-vol context"},
+    "bmsb":   {"kind": "combo", "markets": _CRYPTO, "label": "Bull Market Support Band", "tf": "1W, 1D",
+               "desc": "Close reclaims / loses the SMA 20 + EMA 21 band"},
+    "cpb":    {"kind": "combo", "markets": _CRYPTO, "label": "Crypto Trend Pullback",    "tf": "1H, 1D",
+               "desc": "EMA 21/55 trend, RSI reclaims 40 (loses 60)"},
+    "uvb":    {"kind": "combo", "markets": _CRYPTO, "label": "UTC VWAP Breakout",        "tf": "5m, 15m",
+               "desc": "Break of the UTC-day VWAP band, ADX > 20, ATR rising"},
+    "rdiv":   {"kind": "combo", "markets": _BOTH, "label": "RSI Divergence",           "tf": "1H, 1D",
+               "desc": "Lower low + higher RSI low (and mirror), confirmed 3 bars after the swing"},
 }
 
 
@@ -175,7 +198,8 @@ def _coerce(fn: str, name: str, value, spec):
     return num
 
 
-def _build_engine(df, indicator_list: list, timeframe: str = "1Day") -> tuple[IndicatorEngine, list[str]]:
+def _build_engine(df, indicator_list: list, timeframe: str = "1Day",
+                  symbol: str = "") -> tuple[IndicatorEngine, list[str]]:
     engine = IndicatorEngine(df)
     warnings: list[str] = []
     seen: set[tuple[str, str]] = set()
@@ -206,9 +230,13 @@ def _build_engine(df, indicator_list: list, timeframe: str = "1Day") -> tuple[In
             continue
 
         # Session-anchored VWAP is meaningless on daily/weekly bars (one bar
-        # per session), so default to a rolling VWAP there.
+        # per session), so default to a rolling VWAP there. 24/7 crypto has no
+        # US session: its intraday VWAP resets at the UTC daily open.
         if fn in ("vwap", "sig") and "anchor" not in kw:
-            kw["anchor"] = "session" if timeframe in INTRADAY_TIMEFRAMES else "rolling"
+            if timeframe not in INTRADAY_TIMEFRAMES:
+                kw["anchor"] = "rolling"
+            else:
+                kw["anchor"] = "utc" if symbol and is_crypto(symbol) else "session"
 
         dedupe_key = (fn, _json.dumps(kw, sort_keys=True))
         if dedupe_key in seen:
@@ -256,14 +284,22 @@ def get_chart(symbol: str):
             warnings.append(f"bad indicators param ({e}); using preset {preset!r}")
 
     try:
-        df = ds.get_bars(symbol, timeframe, limit=limit)
-        engine, build_warnings = _build_engine(df, indicator_list, timeframe)
-        payload = engine.serialize()
+        df = ds.get_bars(symbol, timeframe, limit=limit + WARMUP_BARS)
+        engine, build_warnings = _build_engine(df, indicator_list, timeframe, symbol)
+        # Scored before trimming: it needs the bars after each marker and a warm ATR.
+        stats = engine.signal_stats(horizon=HORIZON_BARS, last=limit)
+        payload = engine.tail(limit).serialize()
+        payload["stats"] = stats
         payload["warnings"] = warnings + build_warnings
         return jsonify(payload)
     except Exception as e:
         log.warning("chart %s %s failed: %s", symbol, timeframe, e)
         return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/markets")
+def get_markets():
+    return jsonify(MARKETS)
 
 
 @app.route("/api/presets")
@@ -361,7 +397,8 @@ def handle_subscribe(data):
         return
     # Tell this client the Alpaca stream state now; later changes are broadcast.
     # (The client subscribes right after connecting, so this covers new sockets.)
-    emit("stream_status", {"status": get_status()})
+    for market in MARKETS:
+        emit("stream_status", {"market": market, "status": get_status(market)})
     symbol = (data or {}).get("symbol", "SPY").upper()
     symbols = _sid_symbols.setdefault(request.sid, set())
     if symbol in symbols:

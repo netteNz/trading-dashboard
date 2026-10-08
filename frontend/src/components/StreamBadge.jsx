@@ -24,8 +24,10 @@ function useMarketOpen() {
 }
 
 // Alpaca stream state (backend "stream_status"), not our own Socket.IO link.
-export default function StreamBadge({ status }) {
-  const marketOpen = useMarketOpen();
+// Crypto trades 24/7, so it is never MARKET CLOSED.
+export default function StreamBadge({ status, market = "stocks" }) {
+  const sessionOpen = useMarketOpen();
+  const marketOpen = market === "crypto" || sessionOpen;
 
   if (status === "live") {
     return (

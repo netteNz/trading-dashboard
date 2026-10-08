@@ -82,9 +82,8 @@ user PATH). `docker build -t tradeview:local . && docker run -d --name tradeview
    - First request after a container start takes ~5 s (worker's first yfinance call warms up).
    - Fixed: daily charts downloaded 5 years to keep 500 bars; now `yf_lookback()` sizes the window
      (1Min fetch 0.55 s → 0.13 s; every timeframe still returns 500 bars; 5000 daily bars still works).
-   - Not done (offered, declined for now): an in-memory bar cache (≈5 min daily, ≈1 min intraday).
-     Today **every indicator add/remove on the same ticker re-downloads from Yahoo**, so this is the
-     biggest remaining win.
+   - Done (2026-10-08): in-memory bar cache in `DataSource.get_bars` (60 s intraday, 5 min daily). Indicator
+     and preset toggles on SPY 1D went from ~0.8–2 s to ~15 ms.
    - Rapid switching cancels requests in the browser, but the server still finishes each one, competing
      in the single gunicorn worker (`-w 1`, gthread).
 3. **Pitfall: only one Alpaca stream per key.** Importing `app` in a second process with `ENABLE_STREAM=1`
@@ -96,7 +95,8 @@ user PATH). `docker build -t tradeview:local . && docker run -d --name tradeview
 
 ## Open ideas (not scheduled)
 
-- Markers are rule onsets, not backtested edges. A backtest of each rule (hit rate, avg R) would say
-  which combos deserve trust on which timeframe.
+- Markers are rule onsets, not backtested edges. Partly answered (2026-10-08): the in-sample scorecard
+  (`signal_stats.py`, hit rate vs baseline, median move, drawdown in ATR over 10 bars). A proper
+  walk-forward backtest with costs is still open.
 - A "collapse all sub-panes" control, if per-pane eyes turn out to be too fiddly.
 - Exchange holiday calendar for the MARKET CLOSED badge.

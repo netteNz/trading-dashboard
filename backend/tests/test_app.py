@@ -48,6 +48,11 @@ def test_vwap_anchor_follows_timeframe():
     assert engine._indicator_meta[0]["label"] == "VWAP (20)"
     engine, _ = app_module._build_engine(df, [{"fn": "vwap", "kwargs": {}}], "5Min")
     assert engine._indicator_meta[0]["label"] == "VWAP"
+    # 24/7 crypto has no US session: intraday VWAP anchors at the UTC day.
+    engine, _ = app_module._build_engine(df, [{"fn": "vwap", "kwargs": {}}], "5Min", "BTC-USD")
+    assert engine._indicator_meta[0]["label"] == "VWAP (UTC)"
+    engine, _ = app_module._build_engine(df, [{"fn": "vwap", "kwargs": {}}], "1Day", "BTC-USD")
+    assert engine._indicator_meta[0]["label"] == "VWAP (20)"
 
 
 def test_indicators_endpoint_lists_params(client):
@@ -66,6 +71,7 @@ def test_presets_endpoint_shape(client):
     assert kinds == sorted(kinds, key=lambda k: k != "core")       # core first
     for p in body:
         assert p["label"] and p["desc"] and p["tf"]
+        assert p["markets"] and set(p["markets"]) <= set(app_module.MARKETS), p["name"]
         assert p["indicators"] == app_module.INDICATOR_PRESETS[p["name"]]
 
 
@@ -105,8 +111,15 @@ def test_stream_status_sent_on_subscribe(client, monkeypatch):
     assert sio.is_connected()
     sio.emit("subscribe", {"symbol": "SPY"})
     events = [e for e in sio.get_received() if e["name"] == "stream_status"]
-    assert events and events[-1]["args"][0] == {"status": stream.get_status()}
+    payloads = [e["args"][0] for e in events]
+    assert {p["market"]: p["status"] for p in payloads} == stream.get_status()
     sio.disconnect()
+
+
+def test_markets_endpoint(client):
+    body = client.get("/api/markets").get_json()
+    assert body["crypto"]["default"] == "BTC-USD"
+    assert body["stocks"]["default"] in body["stocks"]["watchlist"]
 
 
 # ── Yahoo lookback ────────────────────────────────────────────────────────────

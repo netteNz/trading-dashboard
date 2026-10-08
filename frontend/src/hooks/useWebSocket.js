@@ -24,11 +24,13 @@ export function closeSocket() {
   }
 }
 
-export function useWebSocket(symbol) {
+// `market` ("stocks"|"crypto") picks which Alpaca stream's status to report.
+export function useWebSocket(symbol, market = "stocks") {
   const [lastTick,  setLastTick]  = useState(null);
   const [connected, setConnected] = useState(false);
-  // Alpaca stream state from the backend: starting|live|reconnecting|unauthorized|stopped|disabled.
-  const [streamStatus, setStreamStatus] = useState(null);
+  // Alpaca stream state per market, from the backend:
+  // starting|live|reconnecting|unauthorized|stopped|disabled.
+  const [statuses, setStatuses] = useState({});
   const symRef = useRef(symbol);
 
   // Connection lifecycle: connect once, re-auth on rejection, idle out when hidden.
@@ -43,9 +45,11 @@ export function useWebSocket(symbol) {
     };
     const onDisconnect = () => {
       setConnected(false);
-      setStreamStatus(null);
+      setStatuses({});
     };
-    const onStreamStatus = (msg) => setStreamStatus(msg?.status ?? null);
+    const onStreamStatus = (msg) => {
+      if (msg?.market) setStatuses(s => ({ ...s, [msg.market]: msg.status ?? null }));
+    };
     const reauth = async () => {
       if (await refreshSession()) socket.connect();
     };
@@ -96,5 +100,5 @@ export function useWebSocket(symbol) {
     };
   }, [symbol]);
 
-  return { lastTick, connected, streamStatus };
+  return { lastTick, connected, streamStatus: statuses[market] ?? null };
 }

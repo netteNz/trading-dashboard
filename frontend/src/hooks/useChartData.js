@@ -4,7 +4,9 @@ import { apiFetch } from "../lib/api";
 
 const BASE = "";  // same origin: Vite proxy in dev, Flask in the container
 
-export function useChartData(symbol, timeframe, indicators) {
+// `enabled` holds the first fetch until the indicator list is known (otherwise
+// the first load fetched once with [] and again with the preset).
+export function useChartData(symbol, timeframe, indicators, enabled = true) {
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
@@ -14,7 +16,7 @@ export function useChartData(symbol, timeframe, indicators) {
   const indicatorsJson = JSON.stringify(indicators ?? []);
 
   const fetch_ = useCallback(async () => {
-    if (!symbol) return;
+    if (!symbol || !enabled) return;
 
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = new AbortController();
@@ -35,7 +37,7 @@ export function useChartData(symbol, timeframe, indicators) {
     } finally {
       setLoading(false);
     }
-  }, [symbol, timeframe, indicatorsJson]);
+  }, [symbol, timeframe, indicatorsJson, enabled]);
 
   useEffect(() => { fetch_(); }, [fetch_]);
 

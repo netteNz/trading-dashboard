@@ -3,8 +3,6 @@ import { hasInstance as listHas, sameInstance } from "../lib/indicators";
 
 // ── Static config ─────────────────────────────────────────────────────────────
 
-const WATCHLIST = ["SPY", "QQQ", "AAPL", "TSLA", "NVDA", "AMZN", "MSFT", "META"];
-
 const AVAILABLE = [
   { fn: "ema",    label: "EMA",               params: [{ key: "length", label: "Period", default: 20 }] },
   { fn: "sma",    label: "SMA",               params: [{ key: "length", label: "Period", default: 20 }] },
@@ -85,7 +83,7 @@ function Section({ label, count, isOpen, onToggle, children }) {
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
-export default function IndicatorPanel({ active, onChange, combos = [], symbol, onSymbolChange }) {
+export default function IndicatorPanel({ active, onChange, combos = [], symbol, watchlist = [], onSymbolChange }) {
   const [adding,   setAdding]   = useState(null);
   const [params,   setParams]   = useState({});
   const [sections, setSections] = useState({
@@ -162,11 +160,11 @@ export default function IndicatorPanel({ active, onChange, combos = [], symbol, 
       {/* ── Watchlist ──────────────────────────────────────────────────────── */}
       <Section
         label="Watchlist"
-        count={WATCHLIST.length}
+        count={watchlist.length}
         isOpen={sections.watchlist}
         onToggle={() => toggle("watchlist")}
       >
-        {WATCHLIST.map(ticker => (
+        {watchlist.map(ticker => (
           <button
             key={ticker}
             onClick={() => onSymbolChange?.(ticker)}

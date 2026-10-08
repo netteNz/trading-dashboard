@@ -59,12 +59,27 @@ not configured unless `AUTH_DISABLED=1`. Frontend: `src/lib/api.js` (`apiFetch`,
 | `AUTH_DISABLED`     | dev      | `1` = skip auth (local only)                 |
 | `JWT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `ALLOWED_USERS`, `PUBLIC_URL` | prod | Auth gate config — see `.env.example` |
 
-Live WebSocket stream only starts if `ALPACA_API_KEY` is set and non-placeholder, and Alpaca accepts the
-keys (checked once at startup); status is exposed as `stream` in `/api/health` and the `stream_status` event
-(broadcast on change, and sent to each client on `subscribe`). `useWebSocket` returns it as `streamStatus`;
-`StreamBadge` shows LIVE only for `live`; MARKET CLOSED for `starting` outside 09:30–16:00 ET on weekdays (the
-stream is connected but only turns `live` on the first bar; holidays aren't modelled); CONNECTING for
-`starting`/`reconnecting` during the session; DELAYED otherwise.
+Live WebSocket streams only start if `ALPACA_API_KEY` is set and non-placeholder, and Alpaca accepts the
+keys (checked once at startup). Two channels run in `ws/stream.py`: `stocks` (StockDataStream, pinned SPY) and
+`crypto` (CryptoDataStream, 24/7, pinned BTC-USD); `subscribe(symbol)` routes by `markets.is_crypto`. Status is
+per market: `stream` in `/api/health` is `{stocks, crypto}`, and the `stream_status` event is
+`{market, status}` (broadcast on change, and one per market sent to each client on `subscribe`).
+`useWebSocket(symbol, market)` returns the current market's as `streamStatus`; `StreamBadge` shows LIVE only for
+`live`; MARKET CLOSED for stocks `starting` outside 09:30–16:00 ET on weekdays (the stream is connected but only
+turns `live` on the first bar; holidays aren't modelled) — never for crypto; CONNECTING for
+`starting`/`reconnecting` otherwise; DELAYED otherwise.
+
+### Markets (stocks / crypto)
+
+`backend/markets.py` holds `MARKETS` (label, default symbol, watchlist), served by `GET /api/markets`; the
+frontend's watchlist, search popular list and footer all come from it. Crypto symbols are `BTC-USD` (Yahoo form)
+everywhere in the app; Alpaca's `BTC/USD` exists only inside `data/source.py` (`to_/from_alpaca_crypto`).
+Crypto bars always come from Alpaca's keyless crypto REST whatever `DATA_PROVIDER` says (Yahoo intraday crypto
+has zero volume on ~⅓ of bars), falling back to Yahoo on error. Alpaca crypto volume is single-venue (coins, thin),
+so volume-spike combos are stocks-only. The frontend derives `market` from the symbol (`lib/markets.js`
+`marketOf`); the header `MarketToggle` jumps to the other market's default symbol, and the last symbol is
+persisted (`tv.symbol`). VWAP anchors: `session` (US, NY midnight), `utc` (crypto intraday default), `rolling`
+(daily/weekly).
 
 ## Architecture
 
@@ -72,9 +87,10 @@ stream is connected but only turns `live` on the first bar; holidays aren't mode
 
 ```
 GET /api/chart/:symbol?tf=&limit=&indicators=[]
-  → DataSource.get_bars()          # yfinance or Alpaca REST → OHLCV DataFrame
+  → DataSource.get_bars(limit + WARMUP_BARS)  # yfinance or Alpaca REST → OHLCV DataFrame (cached)
   → _build_engine(df, list)        # dispatches fn string → IndicatorEngine.add_*()
-  → IndicatorEngine.serialize()    # { candles[], indicators[] }
+  → engine.signal_stats()          # combo scorecard, before trimming
+  → engine.tail(limit).serialize() # { candles[], indicators[] } + stats, warnings
   → useChartData() hook            # React fetch with AbortController
   → TradingChart.jsx               # pane 0 = main overlay, pane 1+ = sub-charts
 
@@ -83,6 +99,17 @@ Live tick:
 ```
 
 Vite proxies `/api` and `/socket.io` to `localhost:5000` in dev — no CORS wrangling needed locally.
+
+- **Bar cache**: `DataSource.get_bars` keeps fetched frames in memory per `(symbol, tf, limit)` (60 s intraday,
+  5 min 1Day, 15 min 1Week; `CACHE_*` in `data/source.py`), so indicator/preset toggles don't re-download.
+  Errors aren't cached; callers get a copy.
+- **Warm-up**: `get_chart` fetches `WARMUP_BARS` (250) extra bars, computes everything, then `engine.tail(limit)`
+  — long indicators (SMA 200, EMA 55, regime) are valid from the first visible bar.
+- **Scorecard**: `payload["stats"]` = `{COMBO: {horizon, base_up, buy, sell}}` from
+  `indicators/custom/signal_stats.py` (`HORIZON_BARS` = 10): per side `n`, `open`, `hit`, `median_move_pct`,
+  `median_mae_atr`, scored on the displayed window. It is the **only** module that reads future bars, and only
+  to score existing markers. `SignalScorecard.jsx` shows it (hidden with SIGNALS off; collapse in `tv.scorecard`).
+- `useChartData(…, enabled)` waits for `/api/presets` so the first load fetches once.
 
 ### IndicatorEngine Pattern
 
@@ -150,22 +177,23 @@ and `App.jsx` passes `rlSignals` to `TradingChart` for marker overlay only while
 
 ### Presets
 
-Defined as `INDICATOR_PRESETS` dict in `backend/app.py`, with display info (label, desc, `kind` core|combo, tf)
-in `PRESET_INFO`. `GET /api/presets` serves both; the frontend fetches it once in `App.jsx` and renders the
+Defined as `INDICATOR_PRESETS` dict in `backend/app.py`, with display info (label, desc, `kind` core|combo, tf,
+`markets` — which market toggle lists it) in `PRESET_INFO`; `App.jsx` filters presets to the active market. `GET /api/presets` serves both; the frontend fetches it once in `App.jsx` and renders the
 toolbar (core buttons + combos select) and the IndicatorPanel combo cards from it — no preset lists in the
 frontend. The highlighted preset is derived (exact match of the active list), not stored. Preset name is passed
 as `?preset=` query param. Custom `indicators` JSON array param takes precedence over preset.
 
 Current presets: core `trend`, `momentum`, `scalp`, `full`; combos `ttp`, `tsf`, `ksqz`, `bbrsi`, `osc`, `tmt`,
-`wvs`, `vrb`, `mburst`, `vcs`, `regime`.
+`wvs`, `vrb`, `mburst`, `vcs`, `regime`, `rdiv` (confirmed RSI divergence: marked on the bar that confirms the
+pivot, 3 bars after the swing, so it never repaints); crypto-only combos `bmsb`, `cpb`, `uvb`.
 
 Combo presets end with `{"fn": "sig", "kwargs": {"combo": "<key>"}}`: BUY/SELL confluence markers from
 `backend/indicators/custom/combo_signals.py` (`SIGNAL_RULES`; markers on the bar a rule turns true, no
-look-ahead — enforced by a test). The toolbar SIGNALS toggle hides all scatter markers client side.
+look-ahead — enforced by tests on daily `rolling` and hourly `utc` bars for every rule). The toolbar SIGNALS toggle hides all scatter markers client side.
 
 ### Frontend State (App.jsx)
 
-Top-level state lives in `App.jsx`: `symbol`, `timeframe`, `presets` (from `/api/presets`), `indicators` (active indicator list), `rlEnabled`, `showSignals` (persisted in localStorage), sidebar/panel collapse flags. `activePreset` and `rlSignals` are derived with `useMemo` (keep `rlSignals` referentially stable — it is a `TradingChart` rebuild dependency). `useChartData` re-fetches whenever symbol, timeframe, or indicators change (stable via `JSON.stringify`).
+Top-level state lives in `App.jsx`: `symbol` (persisted; `market` is derived from it), `markets` (from `/api/markets`), `timeframe`, `presets` (from `/api/presets`), `indicators` (active indicator list), `rlEnabled`, `showSignals` (persisted in localStorage), sidebar/panel collapse flags. `activePreset` and `rlSignals` are derived with `useMemo` (keep `rlSignals` referentially stable — it is a `TradingChart` rebuild dependency). `useChartData` re-fetches whenever symbol, timeframe, or indicators change (stable via `JSON.stringify`).
 
 ### Tailwind Theme
 

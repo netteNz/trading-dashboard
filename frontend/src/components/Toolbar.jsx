@@ -11,7 +11,7 @@ const TIMEFRAMES = [
   { value: "1Week", label: "1W" },
 ];
 
-export default function Toolbar({ symbol, timeframe, presets, activePreset, lastTick, streamStatus,
+export default function Toolbar({ symbol, market, timeframe, presets, activePreset, lastTick, streamStatus,
                                   onTimeframeChange, onPresetChange, rl, showSignals, onToggleSignals,
                                   prevClose }) {
   const core   = presets.filter(p => p.kind === "core");
@@ -26,7 +26,7 @@ export default function Toolbar({ symbol, timeframe, presets, activePreset, last
       {/* Symbol + live badge */}
       <div className="flex items-center gap-2">
         <span className="text-sm font-mono font-bold text-white tracking-wide">{symbol}</span>
-        <StreamBadge status={streamStatus} />
+        <StreamBadge status={streamStatus} market={market} />
         {price != null && (
           <span className={`text-sm font-mono font-bold ml-2 ${
             isUp === true  ? "text-accent-green" :

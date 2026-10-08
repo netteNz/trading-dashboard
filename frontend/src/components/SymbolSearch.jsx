@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { apiFetch } from "../lib/api";
 
-const POPULAR = ["SPY", "QQQ", "AAPL", "TSLA", "NVDA", "AMZN", "MSFT", "META"];
-
-export default function SymbolSearch({ value, onChange }) {
+// `popular` is the active market's watchlist (from /api/markets).
+export default function SymbolSearch({ value, onChange, popular = [] }) {
+  const POPULAR = popular;
   const [query,     setQuery]     = useState(value || "");
   const [open,      setOpen]      = useState(false);
   const [results,   setResults]   = useState(POPULAR.map(s => ({ symbol: s, name: "" })));
@@ -64,6 +64,9 @@ export default function SymbolSearch({ value, onChange }) {
 
   // Keep input in sync when parent changes symbol externally
   useEffect(() => { setQuery(value || ""); }, [value]);
+
+  // Market switch: show the new market's list on the next open.
+  useEffect(() => { setResults(popular.map(s => ({ symbol: s, name: "" }))); }, [popular]);
 
   return (
     <div className="relative">

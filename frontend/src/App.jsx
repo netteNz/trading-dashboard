@@ -7,21 +7,31 @@ import SymbolSearch      from "./components/SymbolSearch";
 import IndicatorPanel    from "./components/IndicatorPanel";
 import Toolbar           from "./components/Toolbar";
 import RLAgentMetrics    from "./components/RLAgentMetrics";
+import MarketToggle      from "./components/MarketToggle";
+import SignalScorecard   from "./components/SignalScorecard";
 import { apiFetch }      from "./lib/api";
 import { useAuth }       from "./auth/AuthContext";
 import { sameSet }       from "./lib/indicators";
+import { marketOf, DEFAULT_MARKETS, formatVolume } from "./lib/markets";
 
 const NO_SIGNALS = [];
 const SIGNALS_KEY = "tv.showSignals";
+const SYMBOL_KEY  = "tv.symbol";
 
 function readShowSignals() {
   try { return localStorage.getItem(SIGNALS_KEY) !== "0"; } catch { return true; }
 }
 
+function readSymbol() {
+  try { return localStorage.getItem(SYMBOL_KEY) || "SPY"; } catch { return "SPY"; }
+}
+
 export default function App() {
-  const [symbol,    setSymbol]    = useState("SPY");
+  const [symbol,    setSymbol]    = useState(readSymbol);
   const [timeframe, setTimeframe] = useState("1Day");
-  const [presets,   setPresets]   = useState([]);
+  const [markets,   setMarkets]   = useState(DEFAULT_MARKETS);
+  const [allPresets, setPresets]  = useState([]);
+  const [presetsReady, setPresetsReady] = useState(false);
   const [indicators, setIndicators] = useState([]);
   const [rlEnabled, setRlEnabled] = useState(false);
   const [showSignals, setShowSignals] = useState(readShowSignals);
@@ -39,8 +49,35 @@ export default function App() {
         const full = list.find(p => p.name === "full");
         if (full) setIndicators(full.indicators);
       })
-      .catch(e => console.warn("[presets] failed to load:", e));
+      .catch(e => console.warn("[presets] failed to load:", e))
+      .finally(() => setPresetsReady(true));    // on failure the chart still loads (candles only)
+    apiFetch("/api/markets")
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then(setMarkets)
+      .catch(e => console.warn("[markets] failed to load:", e));
   }, []);
+
+  // The market follows the symbol (typing BTC-USD switches to crypto); the
+  // last symbol is remembered, so the market survives a reload too.
+  const market = marketOf(symbol);
+  useEffect(() => {
+    try { localStorage.setItem(SYMBOL_KEY, symbol); } catch { /* storage blocked */ }
+  }, [symbol]);
+  const watchlist = markets[market]?.watchlist ?? [];
+
+  // Only the presets that make sense for this market (backend "markets" tag).
+  const presets = useMemo(
+    () => allPresets.filter(p => !p.markets || p.markets.includes(market)),
+    [allPresets, market],
+  );
+
+  const handleMarketChange = (m) => {
+    setSymbol(markets[m]?.default ?? DEFAULT_MARKETS[m].default);
+    // A combo from the other market would linger un-highlighted: reset to Full.
+    const current = allPresets.find(p => sameSet(p.indicators, indicators));
+    const full = allPresets.find(p => p.name === "full");
+    if (current?.markets && !current.markets.includes(m) && full) setIndicators(full.indicators);
+  };
 
   // The highlighted preset is whichever one matches the active list exactly,
   // so a manual edit clears it.
@@ -67,8 +104,8 @@ export default function App() {
     [rlEnabled, rl.data],
   );
 
-  const { data, loading, error, refetch } = useChartData(symbol, timeframe, indicators);
-  const { lastTick, streamStatus }        = useWebSocket(symbol);
+  const { data, loading, error, refetch } = useChartData(symbol, timeframe, indicators, presetsReady);
+  const { lastTick, streamStatus }        = useWebSocket(symbol, market);
 
   // Latest OHLCV from the last candle
   const latestCandle = useMemo(() => {
@@ -94,8 +131,9 @@ export default function App() {
 
         <div className="h-4 w-px bg-surface-3" />
 
-        {/* Symbol search */}
-        <SymbolSearch value={symbol} onChange={setSymbol} />
+        {/* Market + symbol search */}
+        <MarketToggle market={market} markets={markets} onChange={handleMarketChange} />
+        <SymbolSearch value={symbol} onChange={setSymbol} popular={watchlist} />
 
         {/* OHLCV readout */}
         {latestCandle && (
@@ -113,10 +151,10 @@ export default function App() {
                 </span>
               </span>
             ))}
-            {latestCandle.volume && (
+            {latestCandle.volume != null && (
               <span className="text-surface-4">
                 <span className="text-surface-3 mr-0.5">V</span>
-                <span className="text-accent-yellow">{(latestCandle.volume / 1e6).toFixed(2)}M</span>
+                <span className="text-accent-yellow">{formatVolume(latestCandle.volume)}</span>
               </span>
             )}
           </div>
@@ -157,6 +195,7 @@ export default function App() {
         activePreset={activePreset}
         lastTick={lastTick}
         streamStatus={streamStatus}
+        market={market}
         prevClose={prevClose}
         onTimeframeChange={setTimeframe}
         onPresetChange={handlePresetChange}
@@ -206,6 +245,7 @@ export default function App() {
               />
             </div>
           )}
+          {data && showSignals && <SignalScorecard stats={data.stats} />}
         </main>
 
       {/* Sidebar: Indicators + RL Metrics */}
@@ -218,6 +258,7 @@ export default function App() {
               onChange={setIndicators}
               combos={combos}
               symbol={symbol}
+              watchlist={watchlist}
               onSymbolChange={setSymbol}
             />
           </aside>
@@ -235,7 +276,7 @@ export default function App() {
       {/* ── Bottom ticker ── */}
       <footer className="h-6 bg-surface-1 border-t border-surface-2 overflow-hidden flex items-center shrink-0">
         <div className="ticker-tape flex items-center gap-8 text-[10px] font-mono text-surface-4 whitespace-nowrap">
-          {["SPY", "QQQ"].map(sym => (
+          {watchlist.map(sym => (
             <button
               key={sym}
               onClick={() => setSymbol(sym)}
@@ -245,7 +286,7 @@ export default function App() {
             </button>
           ))}
           {/* Duplicate for seamless scroll */}
-          {["SPY", "QQQ"].map(sym => (
+          {watchlist.map(sym => (
             <button
               key={`${sym}_2`}
               onClick={() => setSymbol(sym)}

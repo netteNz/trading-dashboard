@@ -7,6 +7,8 @@ import pandas_ta as ta
 from indicators.custom.vwap_band import vwap_band
 from indicators.custom.momentum  import momentum_oscillator, squeeze_momentum
 from indicators.custom.triple_ma import triple_ma
+from indicators.custom.regime    import market_regime, REGIME_COLORS
+from indicators.custom.combo_signals import combo_signals
 
 
 class IndicatorEngine:
@@ -113,6 +115,70 @@ class IndicatorEngine:
             self._indicator_meta.append({"key": "STOCH_D" + sfx, "type": "line", "pane": 4, "color": "#f87171", "label": "Stoch D"})
         return self
 
+    def add_adx(self, length: int = 14) -> "IndicatorEngine":
+        adx = ta.adx(self.df["high"], self.df["low"], self.df["close"], length=length)
+        if adx is not None:
+            sfx = self._suffix(f"ADX_{length}")
+            # ta.adx also returns ADXR_*; pick by prefix, not by formatted name.
+            for prefix, base, color, label in [("ADX_", "ADX", "#e6edf3", f"ADX {length}"),
+                                               ("DMP_", "DMP", "#3fb950", "+DI"),
+                                               ("DMN_", "DMN", "#f85149", "-DI")]:
+                src = [c for c in adx.columns if c.startswith(prefix)][0]
+                key = f"{base}_{length}{sfx}"
+                self.df[key] = adx[src]
+                meta = {"key": key, "type": "line", "pane": 9, "color": color, "label": label}
+                if base == "ADX":
+                    meta["levels"] = [{"value": 25, "color": "#8b949e"}]
+                self._indicator_meta.append(meta)
+        return self
+
+    def add_keltner(self, length: int = 20, scalar: float = 1.5) -> "IndicatorEngine":
+        kc = ta.kc(self.df["high"], self.df["low"], self.df["close"], length=length, scalar=scalar)
+        if kc is not None:
+            sfx = self._suffix("KC_UPPER")
+            # Column names embed the scalar as written (KCLe_20_2 vs KCLe_20_2.0): match on prefix.
+            for prefix, base, label in [("KCU", "KC_UPPER", "KC Upper"), ("KCB", "KC_MID", "KC Mid"),
+                                        ("KCL", "KC_LOWER", "KC Lower")]:
+                src = [c for c in kc.columns if c.startswith(prefix)][0]
+                self.df[base + sfx] = kc[src]
+                self._indicator_meta.append({"key": base + sfx, "type": "line", "pane": 0,
+                                             "color": "#2dd4bf", "label": label, "lineStyle": "dotted"})
+        return self
+
+    def add_mfi(self, length: int = 14) -> "IndicatorEngine":
+        col = f"MFI_{length}"
+        col += self._suffix(col)
+        self.df[col] = ta.mfi(self.df["high"], self.df["low"], self.df["close"],
+                              self.df["volume"].astype(float), length=length)
+        # Shares the RSI pane: same 0–100 scale.
+        self._indicator_meta.append({"key": col, "type": "line", "pane": 1,
+                                     "color": "#f472b6", "label": f"MFI {length}",
+                                     "levels": [{"value": 80, "color": "#ef4444"},
+                                                {"value": 20, "color": "#22c55e"}]})
+        return self
+
+    def add_obv(self, signal: int = 21) -> "IndicatorEngine":
+        sfx = self._suffix("OBV")
+        # ta.obv keeps volume's dtype; integer volume would give an integer OBV.
+        obv = ta.obv(self.df["close"], self.df["volume"].astype(float))
+        self.df["OBV" + sfx]     = obv
+        self.df["OBV_EMA" + sfx] = ta.ema(obv, length=signal)
+        self._indicator_meta.append({"key": "OBV" + sfx,     "type": "line", "pane": 10,
+                                     "color": "#38bdf8", "label": "OBV"})
+        self._indicator_meta.append({"key": "OBV_EMA" + sfx, "type": "line", "pane": 10,
+                                     "color": "#fb923c", "label": f"OBV EMA {signal}"})
+        return self
+
+    def add_cmf(self, length: int = 20) -> "IndicatorEngine":
+        col = f"CMF_{length}"
+        col += self._suffix(col)
+        self.df[col] = ta.cmf(self.df["high"], self.df["low"], self.df["close"],
+                              self.df["volume"].astype(float), length=length)
+        self._indicator_meta.append({"key": col, "type": "histogram", "pane": 11,
+                                     "color": "#34d399", "label": f"CMF {length}",
+                                     "levels": [{"value": 0, "color": "#8b949e"}]})
+        return self
+
     def add_volume_profile(self) -> "IndicatorEngine":
         """Volume histogram + 20-bar volume MA in their own sub-pane."""
         col = "VOL_MA" + self._suffix("VOL_MA")
@@ -166,6 +232,25 @@ class IndicatorEngine:
         self._indicator_meta.append({"key": "TMA_SELL"  + sfx,  "type": "scatter", "pane": 0, "color": "#f85149", "label": "TMA Sell"})
         self._indicator_meta.append({"key": "TMA_ALIGN" + sfx,  "type": "histogram", "pane": 8, "color": "#3fb950", "label": "TMA Align"})
 
+        return self
+
+    def add_market_regime(self) -> "IndicatorEngine":
+        """Regime per bar: 1 trend up, -1 trend down, 2 high volatility, 0 range."""
+        sfx = self._suffix("MRD_REGIME")
+        self._concat(market_regime(self.df), sfx)
+        self._indicator_meta.append({"key": "MRD_REGIME" + sfx, "type": "histogram", "pane": 12,
+                                     "color": "#8b949e", "label": "Regime", "colorMap": REGIME_COLORS})
+        return self
+
+    def add_combo_signals(self, combo: str, anchor: str = "session") -> "IndicatorEngine":
+        """BUY/SELL confluence markers for one combo preset (scatter, pane 0)."""
+        name = combo.upper()
+        sfx = self._suffix(f"SIG_{name}_BUY")
+        self._concat(combo_signals(self.df, combo, anchor=anchor), sfx)
+        self._indicator_meta.append({"key": f"SIG_{name}_BUY{sfx}",  "type": "scatter", "pane": 0,
+                                     "color": "#3fb950", "label": name})
+        self._indicator_meta.append({"key": f"SIG_{name}_SELL{sfx}", "type": "scatter", "pane": 0,
+                                     "color": "#f85149", "label": name})
         return self
 
     # ── Generic passthrough ───────────────────────────────────────────────────

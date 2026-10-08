@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { hasInstance as listHas, sameInstance } from "../lib/indicators";
 
 // ── Static config ─────────────────────────────────────────────────────────────
 
@@ -21,46 +22,33 @@ const AVAILABLE = [
     { key: "mid",   label: "Mid",   default: 7  },
     { key: "slow",  label: "Slow",  default: 20 },
   ]},
+  { fn: "adx",    label: "ADX / DMI",         params: [{ key: "length", label: "Period", default: 14 }] },
+  { fn: "kc",     label: "Keltner Channel",   params: [
+    { key: "length", label: "Period", default: 20 },
+    { key: "scalar", label: "ATR ×",  default: 1.5, int: false },
+  ]},
+  { fn: "mfi",    label: "Money Flow Index",  params: [{ key: "length", label: "Period", default: 14 }] },
+  { fn: "obv",    label: "OBV",               params: [] },
+  { fn: "cmf",    label: "Chaikin Money Flow", params: [{ key: "length", label: "Period", default: 20 }] },
+  { fn: "mrd",    label: "Market Regime",     params: [] },
 ];
 
-const COMBOS = [
-  {
-    key:   "vrb",
-    label: "VWAP Rubber Band",
-    desc:  "Mean reversion · 5/15Min",
-    indicators: [
-      { fn: "vwap",  kwargs: {} },
-      { fn: "stoch", kwargs: {} },
-      { fn: "atr",   kwargs: {} },
-    ],
-  },
-  {
-    key:   "mburst",
-    label: "Momentum Burst",
-    desc:  "Scalp breakout · 1/5Min",
-    indicators: [
-      { fn: "ema", kwargs: { length: 9  } },
-      { fn: "ema", kwargs: { length: 21 } },
-      { fn: "sqz", kwargs: {} },
-    ],
-  },
-  {
-    key:   "vcs",
-    label: "VWAP Cross Scalp",
-    desc:  "VWAP cross · 1/5Min",
-    indicators: [
-      { fn: "rsi",  kwargs: { length: 7 } },
-      { fn: "vwap", kwargs: {} },
-      { fn: "atr",  kwargs: {} },
-    ],
-  },
-];
+// Combo BUY/SELL markers are added with their combo, not from a group list.
+const SIGNAL_LABEL = "Signals";
+
+// Short pill text for an indicator inside a combo card.
+function pillText(ind) {
+  if (ind.fn === "sig") return "SIG";
+  const vals = Object.values(ind.kwargs ?? {});
+  return vals.length ? `${ind.fn.toUpperCase()} ${vals.join("/")}` : ind.fn.toUpperCase();
+}
 
 const GROUPS = [
-  { key: "ma",         label: "Moving Averages", fns: ["ema", "sma", "tma"]              },
-  { key: "osc",        label: "Oscillators",     fns: ["rsi", "macd", "stoch", "mom", "sqz"] },
-  { key: "volatility", label: "Volatility",      fns: ["atr", "bbands"]                  },
-  { key: "volume",     label: "Volume",          fns: ["vwap", "vol"]                    },
+  { key: "ma",         label: "Moving Averages", fns: ["ema", "sma", "tma"]                      },
+  { key: "osc",        label: "Oscillators",     fns: ["rsi", "macd", "stoch", "mom", "sqz", "mfi"] },
+  { key: "trend",      label: "Trend & Regime",  fns: ["adx", "mrd"]                             },
+  { key: "volatility", label: "Volatility",      fns: ["atr", "bbands", "kc"]                    },
+  { key: "volume",     label: "Volume",          fns: ["vwap", "vol", "obv", "cmf"]              },
 ];
 
 // ── Accordion section ─────────────────────────────────────────────────────────
@@ -97,7 +85,7 @@ function Section({ label, count, isOpen, onToggle, children }) {
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
-export default function IndicatorPanel({ active, onChange, symbol, onSymbolChange }) {
+export default function IndicatorPanel({ active, onChange, combos = [], symbol, onSymbolChange }) {
   const [adding,   setAdding]   = useState(null);
   const [params,   setParams]   = useState({});
   const [sections, setSections] = useState({
@@ -106,6 +94,7 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
     combos:     false,
     ma:         false,
     osc:        false,
+    trend:      false,
     volatility: false,
     volume:     false,
   });
@@ -114,10 +103,7 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
 
   // ── Indicator helpers ───────────────────────────────────────────────────────
 
-  // An indicator instance is identified by fn + kwargs (EMA 20 ≠ EMA 50).
-  const sameInstance = (a, b) =>
-    a.fn === b.fn && JSON.stringify(a.kwargs ?? {}) === JSON.stringify(b.kwargs ?? {});
-  const hasInstance  = (ind) => active.some(a => sameInstance(a, ind));
+  const hasInstance  = (ind) => listHas(active, ind);
   const hasAnyOf     = (fn)  => active.some(a => a.fn === fn);
 
   const isComboActive = (combo) => combo.indicators.every(hasInstance);
@@ -209,7 +195,7 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
           <p className="text-[10px] text-surface-4 px-4 py-2">Nothing loaded</p>
         ) : (
           active.map((ind, i) => {
-            const meta    = AVAILABLE.find(a => a.fn === ind.fn);
+            const meta    = ind.fn === "sig" ? { label: SIGNAL_LABEL } : AVAILABLE.find(a => a.fn === ind.fn);
             const kwVals  = Object.values(ind.kwargs || {});
             const suffix  = kwVals.length ? ` · ${kwVals.join(", ")}` : "";
             return (
@@ -237,16 +223,19 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
       {/* ── Combos ─────────────────────────────────────────────────────────── */}
       <Section
         label="Combos"
-        count={COMBOS.filter(c => isComboActive(c)).length}
+        count={combos.filter(c => isComboActive(c)).length}
         isOpen={sections.combos}
         onToggle={() => toggle("combos")}
       >
         <div className="flex flex-col gap-1 px-2 py-1">
-          {COMBOS.map(combo => {
+          {combos.length === 0 && (
+            <p className="text-[10px] text-surface-4 px-2 py-1">No combos loaded</p>
+          )}
+          {combos.map(combo => {
             const comboOn = isComboActive(combo);
             return (
               <div
-                key={combo.key}
+                key={combo.name}
                 className={`rounded border px-2 py-2 transition-colors ${
                   comboOn ? "bg-surface-2 border-accent-cyan/30" : "border-surface-3"
                 }`}
@@ -257,17 +246,18 @@ export default function IndicatorPanel({ active, onChange, symbol, onSymbolChang
                       {combo.label}
                     </p>
                     <p className="text-[10px] text-surface-4 mt-0.5">{combo.desc}</p>
+                    <p className="text-[9px] text-surface-4 mt-0.5 opacity-70">{combo.tf}</p>
                     <div className="flex flex-wrap gap-1 mt-1.5">
-                      {combo.indicators.map((ind, i) => {
-                        const pill = ind.kwargs?.length
-                          ? `${ind.fn.toUpperCase()} ${ind.kwargs.length}`
-                          : ind.fn.toUpperCase();
-                        return (
-                          <span key={i} className="text-[9px] font-mono px-1 py-0.5 bg-surface-3 text-surface-4 rounded">
-                            {pill}
-                          </span>
-                        );
-                      })}
+                      {combo.indicators.map((ind, i) => (
+                        <span
+                          key={i}
+                          className={`text-[9px] font-mono px-1 py-0.5 bg-surface-3 rounded ${
+                            ind.fn === "sig" ? "text-accent-green" : "text-surface-4"
+                          }`}
+                        >
+                          {pillText(ind)}
+                        </span>
+                      ))}
                     </div>
                   </div>
                   <button

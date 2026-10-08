@@ -11,6 +11,7 @@ from auth import init_auth, socket_user
 from data.source import DataSource
 from indicators.engine import IndicatorEngine
 from indicators.custom.vwap_band import ANCHORS as VWAP_ANCHORS
+from indicators.custom.combo_signals import SIGNAL_RULES
 
 load_dotenv()
 
@@ -66,6 +67,14 @@ INDICATORS = {
     "sqz":    ("add_squeeze_momentum",    {}),
     "vol":    ("add_volume_profile",      {}),
     "tma":    ("add_triple_ma",           {"fast": _PERIOD, "mid": _PERIOD, "slow": _PERIOD}),
+    "adx":    ("add_adx",     {"length": (int, 2, 500)}),
+    "kc":     ("add_keltner", {"length": (int, 2, 500), "scalar": (float, 0.1, 10.0)}),
+    "mfi":    ("add_mfi",     {"length": (int, 2, 500)}),
+    "obv":    ("add_obv",     {"signal": _PERIOD}),
+    "cmf":    ("add_cmf",     {"length": (int, 2, 500)}),
+    "mrd":    ("add_market_regime", {}),
+    "sig":    ("add_combo_signals", {"combo": (str, tuple(SIGNAL_RULES)),
+                                     "anchor": (str, VWAP_ANCHORS)}),
 }
 STANDARD_INDICATORS = ["ema", "sma", "bbands", "rsi", "macd", "atr", "stoch"]
 
@@ -82,18 +91,64 @@ DEFAULT_INDICATORS = [
     {"fn": "vol",    "kwargs": {}},
 ]
 
+def _combo(key: str, *indicators: dict) -> list[dict]:
+    """A combo preset: its indicators plus its BUY/SELL confluence markers."""
+    return [*indicators, {"fn": "sig", "kwargs": {"combo": key}}]
+
+
+def _i(fn: str, **kwargs) -> dict:
+    return {"fn": fn, "kwargs": kwargs}
+
+
 INDICATOR_PRESETS = {
-    "trend":    [{"fn": "ema", "kwargs": {"length": 20}}, {"fn": "ema", "kwargs": {"length": 50}},
-                 {"fn": "bbands", "kwargs": {}}, {"fn": "vwap", "kwargs": {}},
-                 {"fn": "tma", "kwargs": {"fast": 3, "mid": 7, "slow": 20}}],
-    "momentum": [{"fn": "rsi", "kwargs": {}}, {"fn": "macd", "kwargs": {}}, {"fn": "mom", "kwargs": {}}],
-    "scalp":    [{"fn": "ema", "kwargs": {"length": 9}}, {"fn": "ema", "kwargs": {"length": 21}},
-                 {"fn": "rsi", "kwargs": {}}, {"fn": "stoch", "kwargs": {}}],
+    "trend":    [_i("ema", length=20), _i("ema", length=50), _i("bbands"), _i("vwap"),
+                 _i("tma", fast=3, mid=7, slow=20)],
+    "momentum": [_i("rsi"), _i("macd"), _i("mom")],
+    "scalp":    [_i("ema", length=9), _i("ema", length=21), _i("rsi"), _i("stoch")],
     "full":     DEFAULT_INDICATORS,
-    # ── Combo presets ──────────────────────────────────────────────────────────
-    "vrb":    [{"fn": "vwap",  "kwargs": {}},              {"fn": "stoch", "kwargs": {}},           {"fn": "atr", "kwargs": {}}],
-    "mburst": [{"fn": "ema",   "kwargs": {"length": 9}},   {"fn": "ema",   "kwargs": {"length": 21}}, {"fn": "sqz", "kwargs": {}}],
-    "vcs":    [{"fn": "rsi",   "kwargs": {"length": 7}},   {"fn": "vwap",  "kwargs": {}},           {"fn": "atr", "kwargs": {}}],
+    # ── Combo presets (signal rules: indicators/custom/combo_signals.py) ─────────
+    "ttp":    _combo("ttp", _i("ema", length=9), _i("ema", length=21), _i("ema", length=55), _i("rsi")),
+    "tsf":    _combo("tsf", _i("ema", length=20), _i("ema", length=50), _i("adx"), _i("macd")),
+    "ksqz":   _combo("ksqz", _i("bbands"), _i("kc"), _i("sqz")),
+    "bbrsi":  _combo("bbrsi", _i("bbands"), _i("rsi"), _i("vol")),
+    "osc":    _combo("osc", _i("rsi"), _i("mfi"), _i("bbands")),
+    "tmt":    _combo("tmt", _i("sma", length=50), _i("sma", length=100), _i("sma", length=200),
+                     _i("macd"), _i("rsi")),
+    "wvs":    _combo("wvs", _i("obv"), _i("cmf"), _i("sqz")),
+    "vrb":    _combo("vrb", _i("vwap"), _i("stoch"), _i("atr")),
+    "mburst": _combo("mburst", _i("ema", length=9), _i("ema", length=21), _i("sqz"), _i("vol")),
+    "vcs":    _combo("vcs", _i("rsi", length=7), _i("vwap"), _i("atr")),
+    "regime": [_i("mrd"), _i("adx"), _i("atr")],
+}
+
+# Display info for every preset — the one place the UI gets labels from.
+PRESET_INFO = {
+    "trend":    {"kind": "core",  "label": "Trend",    "desc": "EMA 20/50, BB, VWAP, Triple MA", "tf": "any"},
+    "momentum": {"kind": "core",  "label": "Momentum", "desc": "RSI, MACD, Mom Osc",             "tf": "any"},
+    "scalp":    {"kind": "core",  "label": "Scalp",    "desc": "EMA 9/21, RSI, Stoch",           "tf": "1m–15m"},
+    "full":     {"kind": "core",  "label": "Full",     "desc": "Default overview",               "tf": "any"},
+    "ttp":    {"kind": "combo", "label": "Triple Trend Pulse",    "tf": "1H, 1D",
+               "desc": "Stacked EMA 9/21/55 + RSI 50 cross"},
+    "tsf":    {"kind": "combo", "label": "Trend Strength Filter", "tf": "1D",
+               "desc": "EMA 20/50 trend, ADX > 25, MACD flip"},
+    "ksqz":   {"kind": "combo", "label": "Keltner Squeeze",       "tf": "15m, 1H",
+               "desc": "BB inside KC, breakout on release"},
+    "bbrsi":  {"kind": "combo", "label": "BB-RSI Reversal",       "tf": "1H, 1D",
+               "desc": "Band tag + RSI extreme + volume spike"},
+    "osc":    {"kind": "combo", "label": "Oversold Confluence",   "tf": "1D",
+               "desc": "RSI, MFI and BB all at extremes"},
+    "tmt":    {"kind": "combo", "label": "Triple MA Trend",       "tf": "1D",
+               "desc": "SMA 50/100/200 stack + MACD + RSI band"},
+    "wvs":    {"kind": "combo", "label": "Wyckoff Volume",        "tf": "1D",
+               "desc": "CMF zero cross confirmed by OBV"},
+    "vrb":    {"kind": "combo", "label": "VWAP Rubber Band",      "tf": "5m, 15m",
+               "desc": "Mean reversion from VWAP bands"},
+    "mburst": {"kind": "combo", "label": "Momentum Burst",        "tf": "1m, 5m",
+               "desc": "EMA ribbon + squeeze flip + volume"},
+    "vcs":    {"kind": "combo", "label": "VWAP Cross Scalp",      "tf": "1m, 5m",
+               "desc": "VWAP cross with RSI 7 momentum"},
+    "regime": {"kind": "combo", "label": "Market Regime",         "tf": "1D",
+               "desc": "Trend / range / high-vol context"},
 }
 
 
@@ -152,7 +207,7 @@ def _build_engine(df, indicator_list: list, timeframe: str = "1Day") -> tuple[In
 
         # Session-anchored VWAP is meaningless on daily/weekly bars (one bar
         # per session), so default to a rolling VWAP there.
-        if fn == "vwap" and "anchor" not in kw:
+        if fn in ("vwap", "sig") and "anchor" not in kw:
             kw["anchor"] = "session" if timeframe in INTRADAY_TIMEFRAMES else "rolling"
 
         dedupe_key = (fn, _json.dumps(kw, sort_keys=True))
@@ -213,7 +268,8 @@ def get_chart(symbol: str):
 
 @app.route("/api/presets")
 def get_presets():
-    return jsonify(list(INDICATOR_PRESETS.keys()))
+    order = sorted(INDICATOR_PRESETS, key=lambda n: PRESET_INFO[n]["kind"] != "core")
+    return jsonify([{"name": n, **PRESET_INFO[n], "indicators": INDICATOR_PRESETS[n]} for n in order])
 
 
 @app.route("/api/presets/<name>")
@@ -296,13 +352,16 @@ def handle_connect(auth=None):
 
 @socketio.on("subscribe")
 def handle_subscribe(data):
-    from ws.stream import subscribe
+    from ws.stream import subscribe, get_status
     # The access token is short-lived but a socket can stay open for hours:
     # re-check on every subscribe and make the client refresh + reconnect.
     if socket_user() is None:
         emit("auth_expired")
         disconnect()
         return
+    # Tell this client the Alpaca stream state now; later changes are broadcast.
+    # (The client subscribes right after connecting, so this covers new sockets.)
+    emit("stream_status", {"status": get_status()})
     symbol = (data or {}).get("symbol", "SPY").upper()
     symbols = _sid_symbols.setdefault(request.sid, set())
     if symbol in symbols:

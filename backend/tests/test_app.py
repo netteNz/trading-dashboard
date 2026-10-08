@@ -54,3 +54,56 @@ def test_indicators_endpoint_lists_params(client):
     body = client.get("/api/indicators").get_json()
     assert "ema" in body["standard"] and "vwap" in body["custom"]
     assert body["params"]["ema"]["length"] == {"type": "int", "min": 1, "max": 500}
+
+
+# ── Presets ───────────────────────────────────────────────────────────────────
+
+def test_presets_endpoint_shape(client):
+    body = client.get("/api/presets").get_json()
+    names = [p["name"] for p in body]
+    assert set(names) == set(app_module.INDICATOR_PRESETS)
+    kinds = [p["kind"] for p in body]
+    assert kinds == sorted(kinds, key=lambda k: k != "core")       # core first
+    for p in body:
+        assert p["label"] and p["desc"] and p["tf"]
+        assert p["indicators"] == app_module.INDICATOR_PRESETS[p["name"]]
+
+
+def test_every_preset_is_valid():
+    # Every preset has display info and only uses registered fns with valid kwargs.
+    assert set(app_module.PRESET_INFO) == set(app_module.INDICATOR_PRESETS)
+    for name, items in app_module.INDICATOR_PRESETS.items():
+        for item in items:
+            assert item["fn"] in app_module.INDICATORS, (name, item)
+            _, schema = app_module.INDICATORS[item["fn"]]
+            for k, v in item["kwargs"].items():
+                assert k in schema, (name, item)
+                app_module._coerce(item["fn"], k, v, schema[k])
+
+
+def test_every_preset_builds_without_warnings():
+    df = make_bars(pd.date_range("2023-01-02", periods=400, freq="B", tz="UTC"))
+    for name, items in app_module.INDICATOR_PRESETS.items():
+        engine, warnings = app_module._build_engine(df, items, "1Day")
+        assert warnings == [], (name, warnings)
+        assert engine._indicator_meta, name
+
+
+def test_unknown_signal_combo_warns(client):
+    body = _chart(client, [{"fn": "sig", "kwargs": {"combo": "nope"}}]).get_json()
+    assert any("combo" in w for w in body["warnings"])
+    assert body["indicators"] == []
+
+
+# ── Socket.IO stream status ───────────────────────────────────────────────────
+
+def test_stream_status_sent_on_subscribe(client, monkeypatch):
+    import ws.stream as stream
+    monkeypatch.setattr(stream, "subscribe", lambda symbol: None)
+    monkeypatch.setattr(stream, "unsubscribe", lambda symbol: None)
+    sio = app_module.socketio.test_client(app_module.app, flask_test_client=client)
+    assert sio.is_connected()
+    sio.emit("subscribe", {"symbol": "SPY"})
+    events = [e for e in sio.get_received() if e["name"] == "stream_status"]
+    assert events and events[-1]["args"][0] == {"status": stream.get_status()}
+    sio.disconnect()

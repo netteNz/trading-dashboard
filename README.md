@@ -79,7 +79,7 @@ app-issued JWT cookies (`backend/auth.py`). For local work set `AUTH_DISABLED=1`
 |--------|--------------------------|---------------------------------------------------------------------------|--------------------------------|
 | GET    | `/api/health`            | — (public)                                                              | `{ status, provider, stream }` |
 | GET    | `/api/chart/:symbol`     | `tf` (default `1Day`), `limit` (default `500`, max `5000`), `preset`, `indicators` | `{ candles[], indicators[], warnings[] }` |
-| GET    | `/api/presets`           | —                                                                       | `string[]`                     |
+| GET    | `/api/presets`           | —                                                                       | `{ name, label, desc, kind, tf, indicators[] }[]` |
 | GET    | `/api/presets/:name`     | —                                                                       | indicator list, or 404         |
 | GET    | `/api/indicators`        | —                                                                       | `{ standard[], custom[] }`     |
 | GET    | `/api/search?q=`         | `q`                                                                     | `{ symbol, name, exchange }[]` |
@@ -87,7 +87,9 @@ app-issued JWT cookies (`backend/auth.py`). For local work set `AUTH_DISABLED=1`
 
 `tf` values: `1Min` `5Min` `15Min` `30Min` `1Hour` `1Day` `1Week`
 
-`preset` values: `trend` `momentum` `scalp` `full` `vrb` `mburst` `vcs`
+`preset` values: core `trend` `momentum` `scalp` `full`; combos `ttp` `tsf` `ksqz` `bbrsi` `osc` `tmt` `wvs`
+`vrb` `mburst` `vcs` `regime`. Combo presets include a `sig` entry that draws BUY/SELL confluence markers
+(rules in `backend/indicators/custom/combo_signals.py`; the toolbar's SIGNALS toggle hides them).
 
 ### Socket.IO events
 

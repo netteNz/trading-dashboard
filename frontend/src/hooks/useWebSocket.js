@@ -27,6 +27,8 @@ export function closeSocket() {
 export function useWebSocket(symbol) {
   const [lastTick,  setLastTick]  = useState(null);
   const [connected, setConnected] = useState(false);
+  // Alpaca stream state from the backend: starting|live|reconnecting|unauthorized|stopped|disabled.
+  const [streamStatus, setStreamStatus] = useState(null);
   const symRef = useRef(symbol);
 
   // Connection lifecycle: connect once, re-auth on rejection, idle out when hidden.
@@ -39,7 +41,11 @@ export function useWebSocket(symbol) {
       // Rooms don't survive a reconnect (or a server restart): resubscribe.
       if (symRef.current) socket.emit("subscribe", { symbol: symRef.current });
     };
-    const onDisconnect = () => setConnected(false);
+    const onDisconnect = () => {
+      setConnected(false);
+      setStreamStatus(null);
+    };
+    const onStreamStatus = (msg) => setStreamStatus(msg?.status ?? null);
     const reauth = async () => {
       if (await refreshSession()) socket.connect();
     };
@@ -63,6 +69,7 @@ export function useWebSocket(symbol) {
     socket.on("connect_error", onConnectError);
     socket.on("auth_expired", reauth);
     socket.on("tick", onTick);
+    socket.on("stream_status", onStreamStatus);
     document.addEventListener("visibilitychange", onVisibility);
     if (!socket.connected) socket.connect();
 
@@ -74,6 +81,7 @@ export function useWebSocket(symbol) {
       socket.off("connect_error", onConnectError);
       socket.off("auth_expired", reauth);
       socket.off("tick", onTick);
+      socket.off("stream_status", onStreamStatus);
     };
   }, []);
 
@@ -88,5 +96,5 @@ export function useWebSocket(symbol) {
     };
   }, [symbol]);
 
-  return { lastTick, connected };
+  return { lastTick, connected, streamStatus };
 }

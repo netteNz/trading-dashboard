@@ -1,3 +1,4 @@
+import math
 import os
 import asyncio
 import logging
@@ -22,15 +23,34 @@ TIMEFRAME_MAP_YF = {
     "1Week": "1wk",
 }
 
-PERIOD_MAP_YF = {
-    "1Min":  "7d",
-    "5Min":  "60d",
-    "15Min": "60d",
-    "30Min": "60d",
-    "1Hour": "730d",
-    "1Day":  "5y",
-    "1Week": "10y",
+# Longest window fetched from Yahoo. Intraday caps are Yahoo's own limits
+# (1m: ~7 days, 5m–30m: 60 days, 1h: 730 days).
+MAX_LOOKBACK_YF = {
+    "1Min":  timedelta(days=7),
+    "5Min":  timedelta(days=59),
+    "15Min": timedelta(days=59),
+    "30Min": timedelta(days=59),
+    "1Hour": timedelta(days=729),
+    "1Day":  timedelta(days=365 * 25),
+    "1Week": timedelta(days=365 * 25),
 }
+
+# Bars per US trading day (regular session) on Yahoo; 1Week is handled apart.
+BARS_PER_DAY_YF = {"1Min": 390, "5Min": 78, "15Min": 26, "30Min": 13, "1Hour": 7, "1Day": 1}
+
+
+def yf_lookback(timeframe: str, limit: int) -> timedelta:
+    """How far back to fetch so roughly `limit` bars come back, not years more.
+
+    Trading days → calendar days (5 of 7, plus ~10% and a week of slack for
+    holidays and half days), capped at Yahoo's limit for the interval.
+    """
+    if timeframe == "1Week":
+        days = limit * 7 + 14
+    else:
+        trading_days = math.ceil(limit / BARS_PER_DAY_YF.get(timeframe, 1))
+        days = math.ceil(trading_days * 7 / 5 * 1.1) + 7
+    return min(timedelta(days=days), MAX_LOOKBACK_YF.get(timeframe, timedelta(days=365 * 25)))
 
 # How far back to start an Alpaca bar query. Generous enough that `limit` bars
 # (up to a few thousand) fit inside the window, including weekends/holidays.
@@ -72,10 +92,12 @@ class DataSource:
 
     def _get_bars_yfinance(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
         yf_interval = TIMEFRAME_MAP_YF.get(timeframe, "1d")
-        yf_period   = PERIOD_MAP_YF.get(timeframe, "5y")
+        # Only as much history as `limit` needs (a fixed 5y for daily bars made
+        # every chart load download ~2.5x the data it kept).
+        start = datetime.now(timezone.utc) - yf_lookback(timeframe, limit)
 
         ticker = yf.Ticker(symbol)
-        df = ticker.history(period=yf_period, interval=yf_interval)
+        df = ticker.history(start=start, interval=yf_interval)
 
         if df.empty:
             raise ValueError(f"No data returned for {symbol}")

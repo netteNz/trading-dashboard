@@ -107,3 +107,18 @@ def test_stream_status_sent_on_subscribe(client, monkeypatch):
     events = [e for e in sio.get_received() if e["name"] == "stream_status"]
     assert events and events[-1]["args"][0] == {"status": stream.get_status()}
     sio.disconnect()
+
+
+# ── Yahoo lookback ────────────────────────────────────────────────────────────
+
+def test_yf_lookback_fits_limit_and_yahoo_caps():
+    from datetime import timedelta
+    from data.source import yf_lookback, MAX_LOOKBACK_YF
+
+    # 500 daily bars ≈ 2 years of trading days, not the old fixed 5 years.
+    assert timedelta(days=500 * 7 / 5) < yf_lookback("1Day", 500) < timedelta(days=365 * 3)
+    # Grows with the limit, never past Yahoo's intraday caps.
+    assert yf_lookback("1Day", 5000) > yf_lookback("1Day", 500)
+    for tf, cap in MAX_LOOKBACK_YF.items():
+        assert yf_lookback(tf, 5000) <= cap, tf
+    assert yf_lookback("1Min", 500) == timedelta(days=7)

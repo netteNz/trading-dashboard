@@ -39,7 +39,7 @@ cd ../frontend && npm ci && npm run dev   # :3000
 - **Sub-panes**: resizable (drag the top edge) and hideable (eye icon); layout persists in localStorage.
 - **Badge**: MARKET CLOSED outside regular hours instead of a misleading CONNECTING.
 
-## Session log — 2026-10-07 (branch `phase-c-combos`, merged into `main`, not pushed)
+## Session log — 2026-10-07 (branch `phase-c-combos`, merged into `main` and pushed)
 
 | Commit | What |
 |---|---|
@@ -55,6 +55,44 @@ pane layout survives a symbol change).
 
 Correction found this session: the old handoff said `stream_status` arrives on connect. It didn't (only on
 change); it is now sent on `subscribe`.
+
+Later the same session, on `main`:
+- `1fc3e80` CI actions moved to their Node 24 majors (checkout v7, setup-python v7, setup-buildx v4,
+  login v4, build-push v7). Run green, Node 20 warning gone.
+- Yahoo fetch sized to the bar limit (`yf_lookback()` in `backend/data/source.py`, test added; 43 tests).
+
+## Findings for next session (from running the production container locally)
+
+Local container: Docker Desktop's CLI is at `C:\Program Files\Docker\Docker\resources\bin` (now on the
+user PATH). `docker build -t tradeview:local . && docker run -d --name tradeview-local -p 8000:8000
+--env-file backend/.env -e AUTH_DISABLED=1 tradeview:local` → http://localhost:8000.
+
+1. **Bug, not fixed: Socket.IO rejects the container's own origin.** The log shows
+   `http://localhost:8000 is not an accepted origin`. `cors_allowed_origins` is an explicit list
+   (`CORS_ORIGINS` default = the Vite dev origins, plus `PUBLIC_URL`), and with a list python-engineio does
+   **not** add the request's own origin (`engineio/base_server.py` `_cors_allowed_origins`). So a local
+   container run without `PUBLIC_URL` gets no live ticks / stream badge and the client retries forever.
+   Azure is fine (PUBLIC_URL set) and the Vite dev server is fine (`localhost:3000` is listed).
+   Fix: pass a callable `(origin, environ)` that allows the allow-list **or** `scheme://host` of the request
+   (honouring `X-Forwarded-Proto/Host`, which ProxyFix already trusts behind ACA). Add a test with
+   `socketio.test_client` sending a same-origin `Origin` header. Quick workaround: `-e PUBLIC_URL=http://localhost:8000`.
+2. **Ticker switch latency.** Measured: server ~0.3–0.6 s for a ticker not fetched recently (almost all
+   Yahoo), ~70 ms when Yahoo answers from its side quickly; browser render is negligible (no long tasks).
+   - Occasional multi-second spikes (5 s, one 15 s) are Yahoo; nothing in our code.
+   - First request after a container start takes ~5 s (worker's first yfinance call warms up).
+   - Fixed: daily charts downloaded 5 years to keep 500 bars; now `yf_lookback()` sizes the window
+     (1Min fetch 0.55 s → 0.13 s; every timeframe still returns 500 bars; 5000 daily bars still works).
+   - Not done (offered, declined for now): an in-memory bar cache (≈5 min daily, ≈1 min intraday).
+     Today **every indicator add/remove on the same ticker re-downloads from Yahoo**, so this is the
+     biggest remaining win.
+   - Rapid switching cancels requests in the browser, but the server still finishes each one, competing
+     in the single gunicorn worker (`-w 1`, gthread).
+3. **Pitfall: only one Alpaca stream per key.** Importing `app` in a second process with `ENABLE_STREAM=1`
+   (e.g. `docker exec … python -c "import app"`) starts another stream and Alpaca answers
+   `connection limit exceeded`. For ad-hoc scripts in the container set `ENABLE_STREAM=0`. Same rule for
+   staging slots / a local `python app.py` while the container runs.
+4. **CI notice:** `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19. Should be harmless (Python pinned by
+   setup-python, build in Docker); pin `ubuntu-24.04` if it causes trouble.
 
 ## Open ideas (not scheduled)
 

@@ -74,7 +74,7 @@ def add_<name>(self, period: int = 14) -> "IndicatorEngine":
 
 ### 3. `backend/app.py`
 
-In `_build_engine()`:
+In the `INDICATORS` registry (`_build_engine()` dispatches from it):
 ```python
 "<key>": ("add_<name>", {"<kwarg>": (int, 1, 500)}),   # INDICATORS registry in app.py
 ```

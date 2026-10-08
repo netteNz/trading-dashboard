@@ -125,10 +125,17 @@ When the combo requires a derived signal (e.g. divergence score, regime label)
 that doesn't exist as a standalone indicator. Follow the 5-step pattern from
 `quant-indicator-builder`:
 1. `backend/indicators/custom/<name>.py`
-2. `IndicatorEngine.add_<name>()`
-3. `SERIES_META` entry
-4. `_build_engine()` elif branch in `app.py`
-5. `IndicatorPanel.jsx` AVAILABLE entry
+2. `IndicatorEngine.add_<name>()` (use `_suffix`/`_concat`; pick pandas-ta columns by prefix)
+3. `INDICATORS` registry entry in `app.py` (fn → engine method + kwarg schema)
+4. `IndicatorPanel.jsx` AVAILABLE + GROUPS entry
+5. Tests in `backend/tests/` (columns, `_2` suffix, no look-ahead)
+
+### Signal markers (BUY/SELL arrows)
+A combo's confluence rule lives in `backend/indicators/custom/combo_signals.py`
+(`SIGNAL_RULES`). Add a rule returning `(buy, sell)` boolean Series, then append
+`{"fn": "sig", "kwargs": {"combo": "<key>"}}` to the preset (the `_combo()` helper
+in `app.py` does this). Only positive shifts — `test_combo_signals_never_look_ahead`
+enforces it. Every preset also needs a `PRESET_INFO` entry (label, desc, kind, tf).
 
 ### Type C — Multi-file System (rare)
 When the combo requires its own state (e.g. ORB levels computed at 9:30 AM,
@@ -189,6 +196,6 @@ Before wiring any combo to the frontend:
 - [ ] Smoke test: `python -c "from indicators.custom.X import X; import yfinance as yf; df=yf.download('SPY','2023-01-01'); print(X(df).tail(5))"`
 - [ ] No NaN bleed past warm-up period (first N rows only)
 - [ ] No forward-looking calculations (no negative `.shift()`)
-- [ ] Column names don't collide with existing SERIES_META keys
+- [ ] Column names don't collide with existing engine columns (`IndicatorEngine` keys)
 - [ ] Pane assignment follows layout reference above
 - [ ] Preset added to both `INDICATOR_PRESETS` (backend) and `AVAILABLE` (frontend)

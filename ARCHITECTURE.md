@@ -101,7 +101,7 @@ App.jsx (state: symbol, timeframe, preset, indicators, lastTick, connected, rlMe
 | GET | `/api/chart/<symbol>` | `tf`, `limit`, `preset`, `indicators` (JSON array) | `{candles[], indicators[]}` |
 | GET | `/api/search` | `q` | `[{symbol, name, exchange}]` |
 | GET | `/api/indicators` | — | `{standard[], custom[]}` with params schema |
-| GET | `/api/presets` | — | `string[]` |
+| GET | `/api/presets` | — | `[{name, label, desc, kind, tf, indicators}]` |
 | GET | `/api/presets/<name>` | — | `[{fn, kwargs}]` |
 | GET | `/api/signals/<symbol>` | — | `{ensemble_metrics, leaderboard_aggregate, signals[]}` |
 

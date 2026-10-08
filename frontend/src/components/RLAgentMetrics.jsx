@@ -1,40 +1,11 @@
-import { useState, useEffect } from "react";
-import { apiFetch } from "../lib/api";
-
 /**
  * RL Agent P&L Panel
  * Displays ensemble signal performance (simulated P&L) and leaderboard stats.
  * Collapsible sidebar panel positioned right of existing panels.
+ * `metrics` is the /api/signals export, fetched once in App (useRLSignals).
  */
-export default function RLAgentMetrics({ symbol, isCollapsed, onToggleCollapse }) {
-  const [metrics, setMetrics] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const fetchMetrics = async () => {
-    if (!symbol) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await apiFetch(`/api/signals/${symbol}`);
-      if (!res.ok) throw new Error("Metrics not found");
-      const data = await res.json();
-      setMetrics(data);
-    } catch (err) {
-      console.warn(`[RL Metrics] Failed to fetch for ${symbol}:`, err);
-      setError(err.message);
-      setMetrics(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Fetch when symbol changes
-  useEffect(() => {
-    fetchMetrics();
-  }, [symbol]);
-
-  if (!metrics || error) {
+export default function RLAgentMetrics({ metrics, isCollapsed, onToggleCollapse }) {
+  if (!metrics) {
     return null; // Don't show panel if no data
   }
 

@@ -1,4 +1,5 @@
 import ExitControls from "./ExitControls";
+import StreamBadge  from "./StreamBadge";
 
 const TIMEFRAMES = [
   { value: "1Min",  label: "1m" },
@@ -10,10 +11,13 @@ const TIMEFRAMES = [
   { value: "1Week", label: "1W" },
 ];
 
-const PRESETS = ["trend", "momentum", "scalp", "full"];
+export default function Toolbar({ symbol, timeframe, presets, activePreset, lastTick, streamStatus,
+                                  onTimeframeChange, onPresetChange, rl, showSignals, onToggleSignals,
+                                  prevClose }) {
+  const core   = presets.filter(p => p.kind === "core");
+  const combos = presets.filter(p => p.kind === "combo");
+  const activeCombo = combos.find(p => p.name === activePreset);
 
-export default function Toolbar({ symbol, timeframe, preset, lastTick, connected,
-                                  onTimeframeChange, onPresetChange, onToggleRL, prevClose }) {
   const price = lastTick?.close ?? null;
   const isUp  = price != null && prevClose != null ? price >= prevClose : null;
 
@@ -22,12 +26,7 @@ export default function Toolbar({ symbol, timeframe, preset, lastTick, connected
       {/* Symbol + live badge */}
       <div className="flex items-center gap-2">
         <span className="text-sm font-mono font-bold text-white tracking-wide">{symbol}</span>
-        {connected && (
-          <span className="flex items-center gap-1 text-[10px] font-mono text-accent-green">
-            <span className="live-dot w-1.5 h-1.5 rounded-full bg-accent-green inline-block" />
-            LIVE
-          </span>
-        )}
+        <StreamBadge status={streamStatus} />
         {price != null && (
           <span className={`text-sm font-mono font-bold ml-2 ${
             isUp === true  ? "text-accent-green" :
@@ -62,25 +61,61 @@ export default function Toolbar({ symbol, timeframe, preset, lastTick, connected
       {/* Preset selector */}
       <div className="flex items-center gap-1">
         <span className="text-[10px] text-surface-4 uppercase tracking-widest mr-1">Preset</span>
-        {PRESETS.map(p => (
+        {core.map(p => (
           <button
-            key={p}
-            onClick={() => onPresetChange(p)}
+            key={p.name}
+            onClick={() => onPresetChange(p.name)}
+            title={p.desc}
             className={`px-2 py-0.5 text-[11px] font-mono rounded transition-colors ${
-              preset === p
+              activePreset === p.name
                 ? "bg-surface-3 text-white border border-surface-4"
                 : "text-surface-4 hover:text-white hover:bg-surface-2"
             }`}
           >
-            {p}
+            {p.name}
           </button>
         ))}
+        {combos.length > 0 && (
+          <select
+            value={activeCombo?.name ?? ""}
+            onChange={e => e.target.value && onPresetChange(e.target.value)}
+            title={activeCombo?.desc ?? "Load a combo preset"}
+            className={`ml-1 text-[11px] font-mono rounded px-1 py-0.5 outline-none border transition-colors ${
+              activeCombo
+                ? "bg-surface-3 text-white border-surface-4"
+                : "bg-surface-1 text-surface-4 border-surface-3 hover:text-white"
+            }`}
+          >
+            <option value="">combos…</option>
+            {combos.map(p => (
+              <option key={p.name} value={p.name}>{p.label} · {p.tf}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="h-4 w-px bg-surface-3" />
       
       {/* RL Signals Control */}
-      <ExitControls symbol={symbol} onToggleSignals={onToggleRL} />
+      <ExitControls
+        enabled={rl.enabled}
+        onToggle={rl.onToggle}
+        loading={rl.loading}
+        unavailable={!rl.loading && !rl.available}
+      />
+
+      {/* TA confluence markers (combo BUY/SELL arrows, Triple MA arrows) */}
+      <button
+        onClick={() => onToggleSignals(!showSignals)}
+        title="Show or hide BUY/SELL signal markers"
+        className={`px-2 py-1 text-[11px] font-mono font-bold rounded border transition-colors ${
+          showSignals
+            ? "bg-accent-green/10 border-accent-green text-accent-green"
+            : "bg-surface-3 border-surface-4 text-surface-4 hover:text-white"
+        }`}
+      >
+        SIGNALS {showSignals ? "ON" : "OFF"}
+      </button>
 
       <div className="ml-auto flex items-center gap-2">
         <span className="text-[10px] font-mono text-surface-4">

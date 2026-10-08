@@ -52,11 +52,18 @@ function lineStyleFromStr(s) {
 // One point per candle, using whitespace ({ time } only) where the indicator is
 // still warming up. Every series then has the same bar indices as the candles,
 // which keeps the stacked panes aligned when their logical ranges are synced.
-function seriesData(candles, key) {
-  return candles.map(d => (d[key] != null ? { time: d.time, value: d[key] } : { time: d.time }));
+// An optional colorMap ({ "<value>": "#hex" }) colours each histogram bar by
+// its value (the market regime uses it).
+function seriesData(candles, key, colorMap) {
+  return candles.map(d => {
+    const v = d[key];
+    if (v == null) return { time: d.time };
+    const color = colorMap?.[String(v)];
+    return color ? { time: d.time, value: v, color } : { time: d.time, value: v };
+  });
 }
 
-export default function TradingChart({ data, lastTick, rlSignals = [], timeframe, viewKey }) {
+export default function TradingChart({ data, lastTick, rlSignals = [], showSignals = true, timeframe, viewKey }) {
   const containerRef = useRef(null);
   const chartRef     = useRef(null);
   const seriesMap    = useRef({});
@@ -101,6 +108,7 @@ export default function TradingChart({ data, lastTick, rlSignals = [], timeframe
     const markers = [];
     for (const ind of indicators.filter(i => i.pane === 0)) {
       if (ind.type === "scatter") {
+        if (!showSignals) continue;
         const buy = ind.key.includes("BUY");
         for (const d of candles) {
           if (d[ind.key] == null) continue;
@@ -179,7 +187,7 @@ export default function TradingChart({ data, lastTick, rlSignals = [], timeframe
               title:            ind.label,
               ...fmt,
             });
-        series.setData(seriesData(candles, ind.key));
+        series.setData(seriesData(candles, ind.key, ind.type === "histogram" ? ind.colorMap : undefined));
         seriesMap.current[ind.key] = series;
 
         for (const level of ind.levels ?? []) {
@@ -242,7 +250,7 @@ export default function TradingChart({ data, lastTick, rlSignals = [], timeframe
       seriesMap.current = {};
       panesRef.current  = {};
     };
-  }, [data, rlSignals, timeframe, viewKey]);
+  }, [data, rlSignals, showSignals, timeframe, viewKey]);
 
   useEffect(() => buildChart(), [buildChart]);
 

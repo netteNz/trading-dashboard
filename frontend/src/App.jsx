@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useChartData }  from "./hooks/useChartData";
 import { useWebSocket }  from "./hooks/useWebSocket";
+import { useRLSignals }  from "./hooks/useRLSignals";
 import TradingChart      from "./components/TradingChart";
 import SymbolSearch      from "./components/SymbolSearch";
 import IndicatorPanel    from "./components/IndicatorPanel";
@@ -8,41 +9,66 @@ import Toolbar           from "./components/Toolbar";
 import RLAgentMetrics    from "./components/RLAgentMetrics";
 import { apiFetch }      from "./lib/api";
 import { useAuth }       from "./auth/AuthContext";
+import { sameSet }       from "./lib/indicators";
 
-async function fetchPreset(name) {
-  const res = await apiFetch(`/api/presets/${name}`);
-  if (!res.ok) throw new Error(`preset ${name} not found`);
-  return res.json();
+const NO_SIGNALS = [];
+const SIGNALS_KEY = "tv.showSignals";
+
+function readShowSignals() {
+  try { return localStorage.getItem(SIGNALS_KEY) !== "0"; } catch { return true; }
 }
 
 export default function App() {
   const [symbol,    setSymbol]    = useState("SPY");
   const [timeframe, setTimeframe] = useState("1Day");
-  const [preset,    setPreset]    = useState("full");
+  const [presets,   setPresets]   = useState([]);
   const [indicators, setIndicators] = useState([]);
+  const [rlEnabled, setRlEnabled] = useState(false);
+  const [showSignals, setShowSignals] = useState(readShowSignals);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [rlMetricsCollapsed, setRlMetricsCollapsed] = useState(false);
   const { user, logout } = useAuth();
 
 
-  // Load the default preset from the backend on mount
+  // Presets (labels, descriptions, indicator lists) come from the backend once.
   useEffect(() => {
-    fetchPreset("full").then(setIndicators).catch(() => {});
+    apiFetch("/api/presets")
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then(list => {
+        setPresets(list);
+        const full = list.find(p => p.name === "full");
+        if (full) setIndicators(full.indicators);
+      })
+      .catch(e => console.warn("[presets] failed to load:", e));
   }, []);
 
-  const [rlSignals, setRlSignals] = useState([]);
+  // The highlighted preset is whichever one matches the active list exactly,
+  // so a manual edit clears it.
+  const activePreset = useMemo(
+    () => presets.find(p => sameSet(p.indicators, indicators))?.name ?? null,
+    [presets, indicators],
+  );
+  const combos = useMemo(() => presets.filter(p => p.kind === "combo"), [presets]);
 
-  const handlePresetChange = (p) => {
-    setPreset(p);
-    fetchPreset(p).then(setIndicators).catch(() => {});
+  const handlePresetChange = (name) => {
+    const p = presets.find(x => x.name === name);
+    if (p) setIndicators(p.indicators);
   };
 
-  const handleToggleRL = (enabled, signals) => {
-    setRlSignals(enabled ? signals : []);
+  const handleToggleSignals = (on) => {
+    setShowSignals(on);
+    try { localStorage.setItem(SIGNALS_KEY, on ? "1" : "0"); } catch { /* storage blocked */ }
   };
+
+  const rl = useRLSignals(symbol);
+  // Stable reference: a fresh [] each render would rebuild the chart every render.
+  const rlSignals = useMemo(
+    () => (rlEnabled && rl.data?.signals) || NO_SIGNALS,
+    [rlEnabled, rl.data],
+  );
 
   const { data, loading, error, refetch } = useChartData(symbol, timeframe, indicators);
-  const { lastTick, connected }           = useWebSocket(symbol);
+  const { lastTick, streamStatus }        = useWebSocket(symbol);
 
   // Latest OHLCV from the last candle
   const latestCandle = useMemo(() => {
@@ -97,12 +123,6 @@ export default function App() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          {connected && (
-            <span className="flex items-center gap-1 text-[10px] font-mono text-accent-green">
-              <span className="live-dot w-1.5 h-1.5 rounded-full bg-accent-green inline-block" />
-              LIVE
-            </span>
-          )}
           <button
             onClick={() => setSidebarOpen(o => !o)}
             className="text-[11px] font-mono text-surface-4 hover:text-accent-cyan px-2 py-1 rounded hover:bg-surface-2 transition-colors"
@@ -133,13 +153,16 @@ export default function App() {
       <Toolbar
         symbol={symbol}
         timeframe={timeframe}
-        preset={preset}
+        presets={presets}
+        activePreset={activePreset}
         lastTick={lastTick}
-        connected={connected}
+        streamStatus={streamStatus}
         prevClose={prevClose}
         onTimeframeChange={setTimeframe}
         onPresetChange={handlePresetChange}
-        onToggleRL={handleToggleRL}
+        rl={{ enabled: rlEnabled, onToggle: setRlEnabled, loading: rl.loading, available: !!rl.data }}
+        showSignals={showSignals}
+        onToggleSignals={handleToggleSignals}
       />
 
       {/* ── Main body ── */}
@@ -177,6 +200,7 @@ export default function App() {
                 data={data}
                 lastTick={data.symbol === symbol ? lastTick : null}
                 rlSignals={rlSignals}
+                showSignals={showSignals}
                 timeframe={data.timeframe}
                 viewKey={`${data.symbol}|${data.timeframe}`}
               />
@@ -192,6 +216,7 @@ export default function App() {
             <IndicatorPanel
               active={indicators}
               onChange={setIndicators}
+              combos={combos}
               symbol={symbol}
               onSymbolChange={setSymbol}
             />
@@ -199,7 +224,7 @@ export default function App() {
       
           {/* RL Agent P&L Panel */}
           <RLAgentMetrics
-            symbol={symbol}
+            metrics={rl.data}
             isCollapsed={rlMetricsCollapsed}
             onToggleCollapse={() => setRlMetricsCollapsed(!rlMetricsCollapsed)}
           />

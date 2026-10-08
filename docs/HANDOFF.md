@@ -23,7 +23,7 @@ cd ../frontend && npm ci && npm run dev   # :3000
   on macOS (candidate 1 in `backend/app.py` `get_signals`). Otherwise set `RL_SIGNALS_DIR`.
 - The live stream needs real Alpaca keys and market hours. Without them, `/api/health` reports
   `stream: disabled` and the badge shows DELAYED; that is expected. With valid keys outside market
-  hours it shows CONNECTING (status stays `starting` until the first bar).
+  hours it shows MARKET CLOSED (status stays `starting` until the first bar).
 
 ## What Phase C + combos changed
 
@@ -36,9 +36,29 @@ cd ../frontend && npm ci && npm run dev   # :3000
   entry with BUY/SELL markers (`backend/indicators/custom/combo_signals.py`), hidden by the SIGNALS toggle.
 - Deliberately skipped: Divergence Scanner (needs future pivots, would repaint), Opening Range Break
   (session state), Adaptive RSI.
+- **Sub-panes**: resizable (drag the top edge) and hideable (eye icon); layout persists in localStorage.
+- **Badge**: MARKET CLOSED outside regular hours instead of a misleading CONNECTING.
+
+## Session log — 2026-10-07 (branch `phase-c-combos`, merged into `main`, not pushed)
+
+| Commit | What |
+|---|---|
+| `ab451ef` | Backend: ADX/KC/MFI/OBV/CMF/Market Regime, `combo_signals.py` (10 rules), 8 combo presets, `PRESET_INFO`, `/api/presets` objects, `stream_status` on subscribe, 9 new tests |
+| `75d151e` | Frontend Phase C: presets from the backend, derived highlight, `useRLSignals`, `StreamBadge`, SIGNALS toggle, regime colours |
+| `71bf65f` | Docs: CLAUDE.md, README, ARCHITECTURE, combo-builder skill, this handoff |
+| `e71008a` | Resizable/hideable sub-panes; MARKET CLOSED badge |
+
+Verified: 42 backend tests pass, `npm run build` clean, every preset builds without warnings on real
+yfinance data (QQQ 1D and 5Min), and the browser checks from the Phase C list (all presets listed,
+highlight clears on edit, one `/api/signals` per symbol change, no LIVE without bars, toggle keeps zoom,
+pane layout survives a symbol change).
+
+Correction found this session: the old handoff said `stream_status` arrives on connect. It didn't (only on
+change); it is now sent on `subscribe`.
 
 ## Open ideas (not scheduled)
 
-- Many sub-panes get thin: `TradingChart` splits 45% of the height evenly with no minimum.
 - Markers are rule onsets, not backtested edges. A backtest of each rule (hit rate, avg R) would say
   which combos deserve trust on which timeframe.
+- A "collapse all sub-panes" control, if per-pane eyes turn out to be too fiddly.
+- Exchange holiday calendar for the MARKET CLOSED badge.

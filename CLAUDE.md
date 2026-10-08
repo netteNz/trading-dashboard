@@ -62,8 +62,9 @@ not configured unless `AUTH_DISABLED=1`. Frontend: `src/lib/api.js` (`apiFetch`,
 Live WebSocket stream only starts if `ALPACA_API_KEY` is set and non-placeholder, and Alpaca accepts the
 keys (checked once at startup); status is exposed as `stream` in `/api/health` and the `stream_status` event
 (broadcast on change, and sent to each client on `subscribe`). `useWebSocket` returns it as `streamStatus`;
-`StreamBadge` shows LIVE only for `live`, CONNECTING for `starting`/`reconnecting` (with valid keys this persists
-outside market hours, until the first bar), DELAYED otherwise.
+`StreamBadge` shows LIVE only for `live`; MARKET CLOSED for `starting` outside 09:30–16:00 ET on weekdays (the
+stream is connected but only turns `live` on the first bar; holidays aren't modelled); CONNECTING for
+`starting`/`reconnecting` during the session; DELAYED otherwise.
 
 ## Architecture
 
@@ -97,10 +98,16 @@ Indicator meta shape drives frontend rendering:
     "label":     "Display Name",
     "lineStyle": "dashed"|"dotted",   # optional
     "levels":    [{"value": 70, "color": "#hex"}],  # optional reference lines
+    "colorMap":  {"1": "#hex", "-1": "#hex"},       # optional, histogram: colour per bar value
 }
 ```
 
 Sub-panes are rendered as separate `lightweight-charts` chart instances stacked below the main chart in `TradingChart.jsx`.
+They are resizable (drag a pane's top edge; it trades height with the visible pane above) and hideable (eye icon →
+20px labelled strip). The layout is stored as weights + hidden flags per pane number in localStorage
+(`tv.paneLayout`) and applied by `applyLayout()` without rebuilding charts, so zoom survives. Pane numbers are fixed
+per indicator type (RSI 1, MACD 2, ATR 3, Stoch 4, Vol 5, Mom 6, SQZ 7, TMA 8, ADX 9, OBV 10, CMF 11, Regime 12;
+MFI shares RSI's pane), so a new indicator that needs its own pane takes the next free number.
 
 ### Adding a Custom Indicator (3 touch points)
 
